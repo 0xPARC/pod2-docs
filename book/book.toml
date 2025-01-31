@@ -4,3 +4,6 @@ language = "en"
 multilingual = false
 src = "src"
 title = "POD2-docs"
+
+[output.html]
+default-theme = "light"
