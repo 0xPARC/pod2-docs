@@ -2,13 +2,19 @@ use hex::{FromHex, FromHexError};
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::poseidon::PoseidonHash;
-use plonky2::plonk::config::Hasher;
+use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
+use std::cmp::Ordering;
 use std::fmt;
 
 pub mod backend;
 pub mod frontend;
+pub mod merkletree;
 
 pub type F = GoldilocksField;
+/// C is the Plonky2 config used in POD2 to work with Plonky2 recursion.
+pub type C = PoseidonGoldilocksConfig;
+/// D defines the extension degree of the field used in the Plonky2 proofs (quadratic extension).
+pub const D: usize = 2;
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub struct Hash(pub [F; 4]);
@@ -37,6 +43,17 @@ impl FromHex for Hash {
             inner[i] = F::from_canonical_u64(u64::from_le_bytes(buf));
         }
         Ok(Self(inner))
+    }
+}
+
+impl Ord for Hash {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.to_string().cmp(&other.to_string())
+    }
+}
+impl PartialOrd for Hash {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

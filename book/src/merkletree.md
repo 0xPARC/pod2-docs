@@ -39,8 +39,12 @@ Since leaf positions are deterministic based on the key, the same approach is us
 ## Encoding
 > TODO: how key-values, nodes, merkle-proofs, ... are encoded.
 
-## Temporary first version
-The first iteration of the implementation uses a hash of the key-values concatenated, with the idea of replacing it by the MerkleTree approach described above.
+## Developement plan
+- short term: merkle tree as a 'precompile' in POD operations, which allows to directly verify proofs
+	- initial version: just a wrapper on top of the existing Plonky2's MerkleTree
+	- second iteration: implement the MerkleTree specified in this document
+- long term exploration:
+	- explore feasibility of using Starky (for lookups) connected to Plonky2, which would allow doing the approach described at [https://hackmd.io/@aardvark/SkJ-wcTDJe](https://hackmd.io/@aardvark/SkJ-wcTDJe)
 
 
 ## Resources
