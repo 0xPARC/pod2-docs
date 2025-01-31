@@ -30,11 +30,18 @@ Suppose that the binary representation of the key `userPk` is `1011...`. This un
 ## Proofs of inclusion and non-inclusion
 Merkle proofs contain the siblings along the path from the leaf to the root, where the leaf position is determined by the key binary representation. 
 
-The same approach works for proving that a key is not in the tree, and furthermore, that a value is not in the tree. The main difference is that it is proving that in the leaf position there is no key or value stored, and since leaf positions are deterministic based on the key, if at the position of the key `signerPk` the leaf is empty (non-existent), it means that the tree does not contain any leaf with that key.
+Since leaf positions are deterministic based on the key, the same approach is used for non-inclusion proofs, where it can be proven that a key is not in the tree, and furthermore, that a value is not in the tree (although the key exists):
+- Proving that the key does not exist in the tree is achieved by generating the merkle-proof for the specific key, and showing that the (virtual) leaf is empty - this is, showing that going down the path of the non-existing key, there is a leaf with a different key, meaning that the non-existing key has not been inserted in the tree.
+- Proving that a value is not in the tree (although the key exists) is achieved by generating the merkle-proof for the specific key, and showing that the leaf exists but it has a different value than the one being proved.
 
+
+
+## Encoding
+> TODO: how key-values, nodes, merkle-proofs, ... are encoded.
 
 ## Temporary first version
 The first iteration of the implementation uses a hash of the key-values concatenated, with the idea of replacing it by the MerkleTree approach described above.
+
 
 ## Resources
 - [https://docs.iden3.io/publications/pdfs/Merkle-Tree.pdf](https://docs.iden3.io/publications/pdfs/Merkle-Tree.pdf)
