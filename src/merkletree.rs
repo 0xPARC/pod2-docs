@@ -14,6 +14,7 @@ use plonky2::hash::{
 use plonky2::plonk::config::GenericConfig;
 use plonky2::plonk::config::Hasher;
 use std::collections::HashMap;
+use std::iter::IntoIterator;
 
 use crate::backend::Value;
 use crate::{Hash, C, D, F};
@@ -28,6 +29,11 @@ pub struct MerkleTree {
     tree: PlonkyMerkleTree<F, <C as GenericConfig<D>>::Hasher>,
     // keyindex: key -> index mapping. This is just for the current plonky-tree wrapper
     keyindex: HashMap<Hash, usize>,
+    // kvs are a field in the MerkleTree in order to be able to iterate over the keyvalues. This is
+    // specific of the current implementation (Plonky2's tree wrapper), in the next iteration this
+    // will not be needed since the tree implementation itself will offer the hashmap
+    // functionallity.
+    kvs: HashMap<Hash, Value>,
 }
 
 pub struct MerkleProof {
@@ -44,7 +50,7 @@ impl MerkleTree {
         // https://0xparc.github.io/pod2/merkletree.html will not need it since it will be
         // deterministic based on the keys values not on the order of the keys when added into the
         // tree.
-        for (i, (k, v)) in kvs.into_iter().sorted_by_key(|kv| kv.0).enumerate() {
+        for (i, (k, v)) in kvs.clone().into_iter().sorted_by_key(|kv| kv.0).enumerate() {
             let input: Vec<F> = [k.0, v.0].concat();
             let leaf = PoseidonHash::hash_no_pad(&input).elements;
             leaves.push(leaf.into());
@@ -58,7 +64,11 @@ impl MerkleTree {
         }
 
         let tree = PlonkyMerkleTree::<F, <C as GenericConfig<D>>::Hasher>::new(leaves, CAP_HEIGHT);
-        Self { tree, keyindex }
+        Self {
+            tree,
+            keyindex,
+            kvs,
+        }
     }
 
     pub fn root(&self) -> Result<Hash> {
@@ -113,6 +123,19 @@ impl MerkleTree {
         }
         println!("WARNING: MerkleTree::verify_nonexistence is currently a mock");
         Ok(())
+    }
+
+    pub fn iter(&self) -> std::collections::hash_map::Iter<Hash, Value> {
+        self.kvs.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a MerkleTree {
+    type Item = (&'a Hash, &'a Value);
+    type IntoIter = std::collections::hash_map::Iter<'a, Hash, Value>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.kvs.iter()
     }
 }
 
