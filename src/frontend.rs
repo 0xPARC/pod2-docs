@@ -1,3 +1,6 @@
+//! The frontend includes the user-level abstractions and user-friendly types to define and work
+//! with Pods.
+
 use itertools::Itertools;
 use plonky2::field::types::Field;
 use std::collections::HashMap;
@@ -6,7 +9,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::backend;
-use crate::{hash_str, Params, PodId, F, SELF};
+use crate::middleware::{hash_str, Params, PodId, PodSigner, Value as middleValue, F, SELF};
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub enum PodType {
@@ -43,15 +46,13 @@ impl From<i64> for Value {
     }
 }
 
-impl From<&Value> for backend::Value {
+impl From<&Value> for middleValue {
     fn from(v: &Value) -> Self {
         match v {
-            Value::String(s) => backend::Value(hash_str(s).0),
-            Value::Int(v) => {
-                backend::Value([F::from_canonical_u64(*v as u64), F::ZERO, F::ZERO, F::ZERO])
-            }
+            Value::String(s) => middleValue(hash_str(s).0),
+            Value::Int(v) => middleValue::from(*v),
             // TODO
-            Value::MerkleTree(mt) => backend::Value([
+            Value::MerkleTree(mt) => middleValue([
                 F::from_canonical_u64(mt.root as u64),
                 F::ZERO,
                 F::ZERO,
@@ -68,6 +69,34 @@ impl fmt::Display for Value {
             Value::Int(v) => write!(f, "{}", v),
             Value::MerkleTree(mt) => write!(f, "mt:{}", mt.root),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SignedPodBuilder {
+    pub params: Params,
+    pub kvs: HashMap<String, Value>,
+}
+
+impl SignedPodBuilder {
+    pub fn new(params: Params) -> Self {
+        Self {
+            params,
+            kvs: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, key: impl Into<String>, value: impl Into<Value>) {
+        self.kvs.insert(key.into(), value.into());
+    }
+
+    pub fn sign<S: PodSigner>(&self, signer: &mut S) -> S::POD {
+        let kvs = self
+            .kvs
+            .iter()
+            .map(|(k, v)| (hash_str(k), middleValue::from(v)))
+            .collect();
+        signer.sign(&self.params, &kvs)
     }
 }
 
@@ -89,7 +118,7 @@ impl SignedPod {
             kvs: self
                 .kvs
                 .iter()
-                .map(|(k, v)| (hash_str(k), backend::Value::from(v)))
+                .map(|(k, v)| (hash_str(k), middleValue::from(v)))
                 .collect(),
         }
     }
@@ -257,7 +286,7 @@ impl<'a> MainPodCompiler<'a> {
                     self.const_cnt += 1;
                     let value_of_args = vec![
                         backend::StatementArg::Ref(backend::AnchoredKey(SELF, key_hash)),
-                        backend::StatementArg::Literal(backend::Value::from(v)),
+                        backend::StatementArg::Literal(middleValue::from(v)),
                     ];
                     self.statements.push(backend::Statement(
                         backend::NativeStatement::ValueOf,
