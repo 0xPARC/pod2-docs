@@ -168,7 +168,7 @@ impl Default for Params {
     }
 }
 
-pub trait SignedPod {
+pub trait SignedPod: fmt::Debug {
     fn verify(&self) -> bool;
     fn id(&self) -> PodId;
     // NOTE: Maybe replace this by

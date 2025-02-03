@@ -9,7 +9,9 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::backend;
-use crate::middleware::{hash_str, Params, PodId, PodSigner, Value as middleValue, F, SELF};
+use crate::middleware::{
+    hash_str, Params, PodId, PodSigner, SignedPod, Value as middleValue, F, SELF,
+};
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub enum PodType {
@@ -101,13 +103,13 @@ impl SignedPodBuilder {
 }
 
 #[derive(Clone, Debug)]
-pub struct SignedPod {
+pub struct DeleteSignedPod {
     pub params: Params,
     pub id: PodId,
     pub kvs: HashMap<String, Value>,
 }
 
-impl SignedPod {
+impl DeleteSignedPod {
     pub fn origin(&self) -> Origin {
         Origin(PodType::Signed, self.id)
     }
@@ -185,8 +187,8 @@ impl From<(Origin, &str)> for StatementArg {
     }
 }
 
-impl From<(&SignedPod, &str)> for StatementArg {
-    fn from((pod, key): (&SignedPod, &str)) -> Self {
+impl From<(&DeleteSignedPod, &str)> for StatementArg {
+    fn from((pod, key): (&DeleteSignedPod, &str)) -> Self {
         StatementArg::Ref(AnchoredKey(pod.origin(), key.to_string()))
     }
 }
@@ -207,15 +209,19 @@ impl fmt::Display for Statement {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MainPodBuilder {
     pub params: Params,
+    pub signed_pods: Vec<Box<dyn SignedPod>>,
     pub statements: Vec<Statement>,
     pub operations: Vec<Operation>,
 }
 
 impl MainPodBuilder {
-    pub fn push_statement(&mut self, st: Statement, op: Operation) {
+    pub fn add_signed_pod(&mut self, pod: Box<dyn SignedPod>) {
+        self.signed_pods.push(pod);
+    }
+    pub fn insert(&mut self, st: Statement, op: Operation) {
         self.statements.push(st);
         self.operations.push(op);
     }
@@ -238,7 +244,7 @@ impl MainPodBuilder {
 pub struct MainPod {
     pub params: Params,
     pub id: PodId,
-    pub input_signed_pods: Vec<SignedPod>,
+    pub input_signed_pods: Vec<DeleteSignedPod>,
     pub input_main_pods: Vec<MainPod>,
     pub statements: Vec<(Statement, Operation)>,
 }
@@ -363,7 +369,7 @@ impl Printer {
         Ok(())
     }
 
-    pub fn fmt_signed_pod(&self, w: &mut dyn Write, pod: &SignedPod) -> io::Result<()> {
+    pub fn fmt_signed_pod(&self, w: &mut dyn Write, pod: &DeleteSignedPod) -> io::Result<()> {
         writeln!(w, "SignedPod (id:{}):", pod.id)?;
         for (k, v) in pod.kvs.iter().sorted_by_key(|kv| kv.0) {
             writeln!(w, "  - {}: {}", k, v)?;
@@ -423,12 +429,12 @@ pub mod tests {
         (max_of, $($arg:expr),+) => { Statement(NativeStatement::max_of, args!($($arg),*)) };
     }
 
-    pub fn data_zu_kyc(params: Params) -> (SignedPod, SignedPod, MainPod) {
+    pub fn data_zu_kyc(params: Params) -> (DeleteSignedPod, DeleteSignedPod, MainPod) {
         let mut kvs = HashMap::new();
         kvs.insert("idNumber".into(), "4242424242".into());
         kvs.insert("dateOfBirth".into(), 1169909384.into());
         kvs.insert("socialSecurityNumber".into(), "G2121210".into());
-        let gov_id = SignedPod {
+        let gov_id = DeleteSignedPod {
             params: params.clone(),
             id: pod_id("1100000000000000000000000000000000000000000000000000000000000000"),
             kvs,
@@ -437,7 +443,7 @@ pub mod tests {
         let mut kvs = HashMap::new();
         kvs.insert("socialSecurityNumber".into(), "G2121210".into());
         kvs.insert("startDate".into(), 1706367566.into());
-        let pay_stub = SignedPod {
+        let pay_stub = DeleteSignedPod {
             params: params.clone(),
             id: pod_id("2200000000000000000000000000000000000000000000000000000000000000"),
             kvs,
