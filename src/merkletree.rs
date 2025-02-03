@@ -16,8 +16,7 @@ use plonky2::plonk::config::Hasher;
 use std::collections::HashMap;
 use std::iter::IntoIterator;
 
-use crate::backend::Value;
-use crate::{Hash, C, D, F};
+use crate::middleware::{Hash, Value, C, D, F};
 
 const CAP_HEIGHT: usize = 0;
 
@@ -143,7 +142,7 @@ impl<'a> IntoIterator for &'a MerkleTree {
 pub mod tests {
     use super::*;
 
-    use crate::hash_str;
+    use crate::middleware::hash_str;
 
     #[test]
     fn test_merkletree() -> Result<()> {

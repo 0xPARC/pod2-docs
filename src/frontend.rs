@@ -1,3 +1,6 @@
+//! The frontend includes the user-level abstractions and user-friendly types to define and work
+//! with Pods.
+
 use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::types::Field;
@@ -7,7 +10,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::backend;
-use crate::{hash_str, Params, PodId, F, SELF};
+use crate::middleware::{hash_str, Hash, Params, PodId, PodSigner, Value as middleValue, F, SELF};
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub enum PodType {
@@ -44,15 +47,13 @@ impl From<i64> for Value {
     }
 }
 
-impl From<&Value> for backend::Value {
+impl From<&Value> for middleValue {
     fn from(v: &Value) -> Self {
         match v {
-            Value::String(s) => backend::Value(hash_str(s).0),
-            Value::Int(v) => {
-                backend::Value([F::from_canonical_u64(*v as u64), F::ZERO, F::ZERO, F::ZERO])
-            }
+            Value::String(s) => middleValue(hash_str(s).0),
+            Value::Int(v) => middleValue::from(*v),
             // TODO
-            Value::MerkleTree(mt) => backend::Value([
+            Value::MerkleTree(mt) => middleValue([
                 F::from_canonical_u64(mt.root as u64),
                 F::ZERO,
                 F::ZERO,
@@ -75,28 +76,54 @@ impl fmt::Display for Value {
 /// SignedPod is a wrapper on top of backend::SignedPod, which additionally stores the
 /// string<-->hash relation of the keys.
 #[derive(Clone, Debug)]
+pub struct SignedPodBuilder {
+    pub params: Params,
+    pub kvs: HashMap<String, Value>,
+}
+
+impl SignedPodBuilder {
+    pub fn new(params: Params) -> Self {
+        Self {
+            params,
+            kvs: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, key: impl Into<String>, value: impl Into<Value>) {
+        self.kvs.insert(key.into(), value.into());
+    }
+
+    pub fn sign<S: PodSigner>(&self, signer: &mut S) -> S::POD {
+        let kvs = self
+            .kvs
+            .iter()
+            .map(|(k, v)| (hash_str(k), middleValue::from(v)))
+            .collect();
+        signer.sign(&self.params, &kvs)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SignedPod {
     pub pod: backend::SignedPod,
     // `string_key_map` is a hashmap to store the relation between key strings and key hashes
     // TODO review if maybe store it as <Hash, String>, so that when iterating we can get each
     // hash respective string
-    string_key_map: HashMap<String, crate::Hash>,
+    string_key_map: HashMap<String, Hash>,
 }
 
 impl SignedPod {
     pub fn new(params: &Params, kvs: HashMap<String, Value>) -> Result<Self> {
-        let (hashed_kvs, string_key_map): (
-            HashMap<crate::Hash, backend::Value>,
-            HashMap<String, crate::Hash>,
-        ) = kvs.iter().fold(
-            (HashMap::new(), HashMap::new()),
-            |(mut hashed_kvs, mut key_to_hash), (k, v)| {
-                let h = hash_str(k);
-                hashed_kvs.insert(h, backend::Value::from(v));
-                key_to_hash.insert(k.clone(), h);
-                (hashed_kvs, key_to_hash)
-            },
-        );
+        let (hashed_kvs, string_key_map): (HashMap<Hash, middleValue>, HashMap<String, Hash>) =
+            kvs.iter().fold(
+                (HashMap::new(), HashMap::new()),
+                |(mut hashed_kvs, mut key_to_hash), (k, v)| {
+                    let h = hash_str(k);
+                    hashed_kvs.insert(h, middleValue::from(v));
+                    key_to_hash.insert(k.clone(), h);
+                    (hashed_kvs, key_to_hash)
+                },
+            );
         let pod = backend::SignedPod::new(params, hashed_kvs)?;
         Ok(Self {
             pod,
@@ -273,7 +300,7 @@ impl<'a> MainPodCompiler<'a> {
                     self.const_cnt += 1;
                     let value_of_args = vec![
                         backend::StatementArg::Ref(backend::AnchoredKey(SELF, key_hash)),
-                        backend::StatementArg::Literal(backend::Value::from(v)),
+                        backend::StatementArg::Literal(middleValue::from(v)),
                     ];
                     self.statements.push(backend::Statement(
                         backend::NativeStatement::ValueOf,
@@ -387,7 +414,7 @@ impl Printer {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::Hash;
+    use crate::middleware::Hash;
     use hex::FromHex;
     use std::io;
 

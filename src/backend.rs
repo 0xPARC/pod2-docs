@@ -2,12 +2,12 @@ use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::types::{Field, PrimeField64};
 use std::collections::HashMap;
-use std::fmt;
 use std::io::{self, Write};
 use std::iter;
 use strum_macros::FromRepr;
 
-use crate::{merkletree::MerkleTree, Hash, Params, PodId, F, NULL};
+use crate::merkletree::MerkleTree;
+use crate::middleware::{Hash, Params, PodId, Value, NULL};
 
 #[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
 pub enum NativeStatement {
@@ -22,24 +22,6 @@ pub enum NativeStatement {
     SumOf,
     ProductOf,
     MaxOf,
-}
-
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub struct Value(pub [F; 4]);
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0[2].is_zero() && self.0[3].is_zero() {
-            // Assume this is an integer
-            let (l0, l1) = (self.0[0].to_canonical_u64(), self.0[1].to_canonical_u64());
-            assert!(l0 < (1 << 32));
-            assert!(l1 < (1 << 32));
-            write!(f, "{}", l0 + l1 * (1 << 32))
-        } else {
-            // Assume this is a hash
-            Hash(self.0).fmt(f)
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
