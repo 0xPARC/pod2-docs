@@ -1,3 +1,5 @@
+use anyhow::Result;
+use itertools::Itertools;
 use plonky2::field::types::{Field, PrimeField64};
 use std::collections::HashMap;
 use std::fmt;
@@ -5,7 +7,7 @@ use std::io::{self, Write};
 use std::iter;
 use strum_macros::FromRepr;
 
-use crate::{Hash, Params, PodId, F, NULL};
+use crate::{merkletree::MerkleTree, Hash, Params, PodId, F, NULL};
 
 #[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
 pub enum NativeStatement {
@@ -69,10 +71,20 @@ impl Statement {
 pub struct SignedPod {
     pub params: Params,
     pub id: PodId,
-    pub kvs: HashMap<Hash, Value>,
+    pub kvs: MerkleTree,
 }
 
 impl SignedPod {
+    pub fn new(params: &Params, kvs: HashMap<Hash, Value>) -> Result<Self> {
+        let mt = MerkleTree::new(kvs);
+        let root = mt.root()?;
+        Ok(Self {
+            params: *params,
+            id: PodId(root),
+            kvs: mt,
+        })
+    }
+
     pub fn is_null(&self) -> bool {
         self.id.0 == NULL
     }
@@ -101,15 +113,15 @@ impl MainPod {
         mut input_signed_pods: Vec<SignedPod>,
         input_main_pods: Vec<MainPod>,
         mut statements: Vec<Statement>,
-    ) -> Self {
+    ) -> Result<Self> {
         Self::pad_statements(&params, &mut statements, params.max_statements);
-        Self::pad_input_signed_pods(&params, &mut input_signed_pods);
-        Self {
+        Self::pad_input_signed_pods(&params, &mut input_signed_pods)?;
+        Ok(Self {
             params,
             id: PodId::default(), // TODO
             input_signed_pods,
             statements,
-        }
+        })
     }
 
     fn statement_none(params: &Params) -> Statement {
@@ -129,13 +141,9 @@ impl MainPod {
         fill_pad(args, StatementArg::None, params.max_statement_args)
     }
 
-    fn pad_input_signed_pods(params: &Params, pods: &mut Vec<SignedPod>) {
-        let pod_none = SignedPod {
-            params: params.clone(),
-            id: PodId::default(),
-            kvs: HashMap::new(),
-        };
-        fill_pad(pods, pod_none, params.max_input_signed_pods)
+    fn pad_input_signed_pods(params: &Params, pods: &mut Vec<SignedPod>) -> Result<()> {
+        let pod_none = SignedPod::new(params, HashMap::new())?;
+        Ok(fill_pad(pods, pod_none, params.max_input_signed_pods))
     }
 
     pub fn input_signed_pods_statements(&self) -> Vec<Vec<Statement>> {
@@ -200,9 +208,11 @@ impl Printer {
 
     pub fn fmt_signed_pod(&self, w: &mut dyn Write, pod: &SignedPod) -> io::Result<()> {
         writeln!(w, "SignedPod ({}):", pod.id)?;
-        // for (k, v) in pod.kvs.iter().sorted_by_key(|kv| kv.0) {
-        // TODO: print in a stable order
-        for (k, v) in pod.kvs.iter() {
+        // Note: current version iterates sorting by keys of the kvs, but the merkletree defined at
+        // https://0xparc.github.io/pod2/merkletree.html will not need it since it will be
+        // deterministic based on the keys values not on the order of the keys when added into the
+        // tree.
+        for (k, v) in pod.kvs.iter().sorted_by_key(|kv| kv.0) {
             writeln!(w, "  - {}: {}", k, v)?;
         }
         Ok(())
@@ -279,18 +289,20 @@ mod tests {
     use crate::frontend;
 
     #[test]
-    fn test_back_0() {
+    fn test_back_0() -> Result<()> {
         let params = Params::default();
-        let (front_gov_id, front_pay_stub, front_kyc) = frontend::tests::data_zu_kyc(params);
-        let gov_id = front_gov_id.compile();
-        let pay_stub = front_pay_stub.compile();
-        let kyc = front_kyc.compile();
+        let (front_gov_id, front_pay_stub, front_kyc) = frontend::tests::data_zu_kyc(params)?;
+        let gov_id = front_gov_id.pod; // get backend's pod
+        let pay_stub = front_pay_stub.pod; // get backend's pod
+        let kyc = front_kyc.compile()?;
         // println!("{:#?}", kyc);
 
         let printer = Printer { skip_none: true };
         let mut w = io::stdout();
-        printer.fmt_signed_pod(&mut w, &gov_id).unwrap();
-        printer.fmt_signed_pod(&mut w, &pay_stub).unwrap();
-        printer.fmt_main_pod(&mut w, &kyc).unwrap();
+        printer.fmt_signed_pod(&mut w, &gov_id)?;
+        printer.fmt_signed_pod(&mut w, &pay_stub)?;
+        printer.fmt_main_pod(&mut w, &kyc)?;
+
+        Ok(())
     }
 }

@@ -1,3 +1,4 @@
+use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::types::Field;
 use std::collections::HashMap;
@@ -71,27 +72,42 @@ impl fmt::Display for Value {
     }
 }
 
+/// SignedPod is a wrapper on top of backend::SignedPod, which additionally stores the
+/// string<-->hash relation of the keys.
 #[derive(Clone, Debug)]
 pub struct SignedPod {
-    pub params: Params,
-    pub id: PodId,
-    pub kvs: HashMap<String, Value>,
+    pub pod: backend::SignedPod,
+    // `string_key_map` is a hashmap to store the relation between key strings and key hashes
+    // TODO review if maybe store it as <Hash, String>, so that when iterating we can get each
+    // hash respective string
+    string_key_map: HashMap<String, crate::Hash>,
 }
 
 impl SignedPod {
-    pub fn origin(&self) -> Origin {
-        Origin(PodType::Signed, self.id)
+    pub fn new(params: &Params, kvs: HashMap<String, Value>) -> Result<Self> {
+        let (hashed_kvs, string_key_map): (
+            HashMap<crate::Hash, backend::Value>,
+            HashMap<String, crate::Hash>,
+        ) = kvs.iter().fold(
+            (HashMap::new(), HashMap::new()),
+            |(mut hashed_kvs, mut key_to_hash), (k, v)| {
+                let h = hash_str(k);
+                hashed_kvs.insert(h, backend::Value::from(v));
+                key_to_hash.insert(k.clone(), h);
+                (hashed_kvs, key_to_hash)
+            },
+        );
+        let pod = backend::SignedPod::new(params, hashed_kvs)?;
+        Ok(Self {
+            pod,
+            string_key_map,
+        })
     }
-    pub fn compile(&self) -> backend::SignedPod {
-        backend::SignedPod {
-            params: self.params,
-            id: self.id,
-            kvs: self
-                .kvs
-                .iter()
-                .map(|(k, v)| (hash_str(k), backend::Value::from(v)))
-                .collect(),
-        }
+    pub fn id(&self) -> PodId {
+        self.pod.id
+    }
+    pub fn origin(&self) -> Origin {
+        Origin(PodType::Signed, self.pod.id)
     }
 }
 
@@ -219,7 +235,7 @@ impl MainPod {
         Origin(PodType::Main, self.id)
     }
 
-    pub fn compile(&self) -> backend::MainPod {
+    pub fn compile(&self) -> Result<backend::MainPod> {
         MainPodCompiler::new(self).compile()
     }
 
@@ -278,7 +294,7 @@ impl<'a> MainPodCompiler<'a> {
         ));
     }
 
-    pub fn compile(mut self) -> backend::MainPod {
+    pub fn compile(mut self) -> Result<backend::MainPod> {
         let MainPod {
             statements,
             params,
@@ -291,7 +307,8 @@ impl<'a> MainPodCompiler<'a> {
                 panic!("too many statements");
             }
         }
-        let input_signed_pods = input_signed_pods.iter().map(|p| p.compile()).collect();
+        let input_signed_pods: Vec<backend::SignedPod> =
+            input_signed_pods.iter().map(|p| p.pod.clone()).collect();
         backend::MainPod::new(params.clone(), input_signed_pods, vec![], self.statements)
     }
 }
@@ -335,8 +352,12 @@ impl Printer {
     }
 
     pub fn fmt_signed_pod(&self, w: &mut dyn Write, pod: &SignedPod) -> io::Result<()> {
-        writeln!(w, "SignedPod (id:{}):", pod.id)?;
-        for (k, v) in pod.kvs.iter().sorted_by_key(|kv| kv.0) {
+        writeln!(w, "SignedPod (id:{}):", pod.id())?;
+        // Note: current version iterates sorting by keys of the kvs, but the merkletree defined at
+        // https://0xparc.github.io/pod2/merkletree.html will not need it since it will be
+        // deterministic based on the keys values not on the order of the keys when added into the
+        // tree.
+        for (k, v) in pod.pod.kvs.iter().sorted_by_key(|kv| kv.0) {
             writeln!(w, "  - {}: {}", k, v)?;
         }
         Ok(())
@@ -346,7 +367,7 @@ impl Printer {
         writeln!(w, "MainPod (id:{}):", pod.id)?;
         writeln!(w, "  input_signed_pods:")?;
         for in_pod in &pod.input_signed_pods {
-            writeln!(w, "    - {}", in_pod.id)?;
+            writeln!(w, "    - {}", in_pod.id())?;
         }
         writeln!(w, "  input_main_pods:")?;
         for in_pod in &pod.input_main_pods {
@@ -394,25 +415,17 @@ pub mod tests {
         (max_of, $($arg:expr),+) => { Statement(NativeStatement::max_of, args!($($arg),*)) };
     }
 
-    pub fn data_zu_kyc(params: Params) -> (SignedPod, SignedPod, MainPod) {
+    pub fn data_zu_kyc(params: Params) -> Result<(SignedPod, SignedPod, MainPod)> {
         let mut kvs = HashMap::new();
         kvs.insert("idNumber".into(), "4242424242".into());
         kvs.insert("dateOfBirth".into(), 1169909384.into());
         kvs.insert("socialSecurityNumber".into(), "G2121210".into());
-        let gov_id = SignedPod {
-            params: params.clone(),
-            id: pod_id("1100000000000000000000000000000000000000000000000000000000000000"),
-            kvs,
-        };
+        let gov_id = SignedPod::new(&params, kvs)?;
 
         let mut kvs = HashMap::new();
         kvs.insert("socialSecurityNumber".into(), "G2121210".into());
         kvs.insert("startDate".into(), 1706367566.into());
-        let pay_stub = SignedPod {
-            params: params.clone(),
-            id: pod_id("2200000000000000000000000000000000000000000000000000000000000000"),
-            kvs,
-        };
+        let pay_stub = SignedPod::new(&params, kvs)?;
 
         let sanction_list = Value::MerkleTree(MerkleTree { root: 1 });
         let now_minus_18y: i64 = 1169909388;
@@ -440,17 +453,19 @@ pub mod tests {
             statements,
         };
 
-        (gov_id, pay_stub, kyc)
+        Ok((gov_id, pay_stub, kyc))
     }
 
     #[test]
-    fn test_front_0() {
-        let (gov_id, pay_stub, kyc) = data_zu_kyc(Params::default());
+    fn test_front_0() -> Result<()> {
+        let (gov_id, pay_stub, kyc) = data_zu_kyc(Params::default())?;
 
         let printer = Printer {};
         let mut w = io::stdout();
         printer.fmt_signed_pod(&mut w, &gov_id).unwrap();
         printer.fmt_signed_pod(&mut w, &pay_stub).unwrap();
         printer.fmt_main_pod(&mut w, &kyc).unwrap();
+
+        Ok(())
     }
 }
