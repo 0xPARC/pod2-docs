@@ -1,10 +1,8 @@
 use crate::middleware::{
-    hash_str, Hash, Params, PodId, PodSigner, SignedPod, Value, KEY_SIGNER, KEY_TYPE,
+    hash_str, Hash, Params, PodId, PodSigner, PodType, SignedPod, Value, KEY_SIGNER, KEY_TYPE,
 };
 use itertools::Itertools;
 use std::collections::HashMap;
-
-pub const MOCK_SIGNED_TYPE: i64 = 1;
 
 pub struct MockSigner {
     pub pk: String,
@@ -25,7 +23,7 @@ impl PodSigner for MockSigner {
         let mut kvs = kvs.clone();
         let pk_hash = hash_str(&self.pk);
         kvs.insert(hash_str(&KEY_SIGNER), Value(pk_hash.0));
-        kvs.insert(hash_str(&KEY_TYPE), Value::from(MOCK_SIGNED_TYPE));
+        kvs.insert(hash_str(&KEY_TYPE), Value::from(PodType::MockSigned));
 
         let id = calculate_pod_id(&kvs);
         let signature = format!("{}_signed_by_{}", id, pk_hash);
@@ -47,7 +45,7 @@ pub struct MockSignedPod {
 impl SignedPod for MockSignedPod {
     fn verify(&self) -> bool {
         // Verify type
-        if Some(&Value::from(MOCK_SIGNED_TYPE)) != self.kvs.get(&hash_str(&KEY_TYPE)) {
+        if Some(&Value::from(PodType::MockSigned)) != self.kvs.get(&hash_str(&KEY_TYPE)) {
             return false;
         }
 

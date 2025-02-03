@@ -126,6 +126,20 @@ impl fmt::Display for PodId {
     }
 }
 
+pub enum PodType {
+    None = 0,
+    MockSigned = 1,
+    MockMain = 2,
+    Signed = 3,
+    Main = 4,
+}
+
+impl From<PodType> for Value {
+    fn from(v: PodType) -> Self {
+        Value::from(v as i64)
+    }
+}
+
 pub fn hash_str(s: &str) -> Hash {
     let mut input = s.as_bytes().to_vec();
     input.push(1); // padding
