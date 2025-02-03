@@ -4,51 +4,11 @@ use plonky2::field::types::{Field, PrimeField64};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::iter;
-use strum_macros::FromRepr;
 
 use crate::merkletree::MerkleTree;
 use crate::middleware::{Hash, Params, PodId, Value, NULL};
 
-#[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
-pub enum NativeStatement {
-    None = 0,
-    ValueOf = 1,
-    Equal = 2,
-    NotEqual,
-    Gt,
-    Lt,
-    Contains,
-    NotContains,
-    SumOf,
-    ProductOf,
-    MaxOf,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct AnchoredKey(pub PodId, pub Hash);
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StatementArg {
-    None,
-    Literal(Value),
-    Ref(AnchoredKey),
-}
-
-impl StatementArg {
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
-
-impl Statement {
-    pub fn is_none(&self) -> bool {
-        matches!(self.0, NativeStatement::None)
-    }
-}
-
+/*
 #[derive(Clone, Debug)]
 pub struct SignedPod {
     pub params: Params,
@@ -288,3 +248,4 @@ mod tests {
         Ok(())
     }
 }
+*/

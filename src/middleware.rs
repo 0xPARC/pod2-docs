@@ -9,6 +9,7 @@ use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;
 use std::fmt;
+use strum_macros::FromRepr;
 
 pub const KEY_SIGNER: &str = "_signer";
 pub const KEY_TYPE: &str = "_type";
@@ -187,7 +188,7 @@ impl Default for Params {
     }
 }
 
-pub trait SignedPod {
+pub trait SignedPod: fmt::Debug {
     fn verify(&self) -> bool;
     fn id(&self) -> PodId;
     // NOTE: Maybe replace this by
@@ -197,7 +198,90 @@ pub trait SignedPod {
 }
 
 pub trait PodSigner {
-    type POD: SignedPod;
+    fn sign(&mut self, params: &Params, kvs: &HashMap<Hash, Value>) -> Box<dyn SignedPod>;
+}
 
-    fn sign(&mut self, params: &Params, kvs: &HashMap<Hash, Value>) -> Self::POD;
+#[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
+pub enum NativeStatement {
+    None = 0,
+    ValueOf = 1,
+    Equal = 2,
+    NotEqual = 3,
+    Gt = 4,
+    Lt = 5,
+    Contains = 6,
+    NotContains = 7,
+    SumOf = 8,
+    ProductOf = 9,
+    MaxOf = 10,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AnchoredKey(pub PodId, pub Hash);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StatementArg {
+    None,
+    Literal(Value),
+    Ref(AnchoredKey),
+}
+
+impl StatementArg {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
+
+impl Statement {
+    pub fn is_none(&self) -> bool {
+        matches!(self.0, NativeStatement::None)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativeOperation {
+    None = 0,
+    NewEntry = 1,
+    CopyStatement = 2,
+    EqualityFromEntries = 3,
+    NonequalityFromEntries = 4,
+    GtFromEntries = 5,
+    LtFromEntries = 6,
+    TransitiveEqualityFromStatements = 7,
+    GtToNonequality = 8,
+    LtToNonequality = 9,
+    ContainsFromEntries = 10,
+    RenameContainedBy = 11,
+    SumOf = 12,
+    ProductOf = 13,
+    MaxOf = 14,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OperationArg {
+    Statement(Statement),
+    Key(AnchoredKey),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
+
+pub trait MainPod: fmt::Debug {
+    fn verify(&self) -> bool;
+    fn id(&self) -> PodId;
+}
+
+#[derive(Debug)]
+pub struct MainPodInputs<'a> {
+    pub signed_pods: &'a [Box<dyn SignedPod>],
+    pub main_pods: &'a [Box<dyn MainPod>],
+    pub statements: &'a [Statement],
+    pub operations: &'a [Operation],
+}
+
+pub trait PodProver {
+    fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Box<dyn MainPod>;
 }

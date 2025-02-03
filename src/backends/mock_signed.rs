@@ -17,9 +17,7 @@ fn calculate_pod_id(kvs: &HashMap<Hash, Value>) -> PodId {
 }
 
 impl PodSigner for MockSigner {
-    type POD = MockSignedPod;
-
-    fn sign(&mut self, _params: &Params, kvs: &HashMap<Hash, Value>) -> Self::POD {
+    fn sign(&mut self, _params: &Params, kvs: &HashMap<Hash, Value>) -> Box<dyn SignedPod> {
         let mut kvs = kvs.clone();
         let pk_hash = hash_str(&self.pk);
         kvs.insert(hash_str(&KEY_SIGNER), Value(pk_hash.0));
@@ -27,11 +25,11 @@ impl PodSigner for MockSigner {
 
         let id = calculate_pod_id(&kvs);
         let signature = format!("{}_signed_by_{}", id, pk_hash);
-        MockSignedPod {
+        Box::new(MockSignedPod {
             kvs: kvs.clone(),
             id,
             signature,
-        }
+        })
     }
 }
 
