@@ -337,7 +337,7 @@ impl Printer {
     pub fn fmt_signed_pod(&self, w: &mut dyn Write, pod: &SignedPod) -> io::Result<()> {
         writeln!(w, "SignedPod (id:{}):", pod.id)?;
         for (k, v) in pod.kvs.iter().sorted_by_key(|kv| kv.0) {
-            println!("  - {}: {}", k, v);
+            writeln!(w, "  - {}: {}", k, v)?;
         }
         Ok(())
     }

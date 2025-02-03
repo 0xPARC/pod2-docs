@@ -203,7 +203,7 @@ impl Printer {
         // for (k, v) in pod.kvs.iter().sorted_by_key(|kv| kv.0) {
         // TODO: print in a stable order
         for (k, v) in pod.kvs.iter() {
-            println!("  - {}: {}", k, v);
+            writeln!(w, "  - {}: {}", k, v)?;
         }
         Ok(())
     }
