@@ -10,20 +10,21 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::middleware::{
-    self, hash_str, Hash, MainPodInputs, NativeOperation, Params, PodId, PodProver, PodSigner, F,
-    SELF,
+    self, hash_str, Hash, MainPodInputs, NativeOperation, NativeStatement, Params, PodId,
+    PodProver, PodSigner, F, SELF,
 };
 
+/// This type is just for presentation purposes.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
-pub enum PodType {
+pub enum PodClass {
     #[default]
-    Signed = 1,
+    Signed,
     Main,
 }
 
 // An Origin, which represents a reference to an ancestor POD.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
-pub struct Origin(pub PodType, pub PodId);
+pub struct Origin(pub PodClass, pub PodId);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MerkleTree {
@@ -82,9 +83,9 @@ pub struct SignedPodBuilder {
 }
 
 impl SignedPodBuilder {
-    pub fn new(params: Params) -> Self {
+    pub fn new(params: &Params) -> Self {
         Self {
-            params,
+            params: params.clone(),
             kvs: HashMap::new(),
         }
     }
@@ -111,7 +112,7 @@ impl SignedPodBuilder {
 
 /// SignedPod is a wrapper on top of backend::SignedPod, which additionally stores the
 /// string<-->hash relation of the keys.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SignedPod {
     pub pod: Box<dyn middleware::SignedPod>,
     /// HashMap to store the reverse relation between key strings and key hashes
@@ -123,26 +124,13 @@ impl SignedPod {
         self.pod.id()
     }
     pub fn origin(&self) -> Origin {
-        Origin(PodType::Signed, self.id())
+        Origin(PodClass::Signed, self.id())
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NativeStatement {
-    Equal = 2,
-    NotEqual,
-    Gt,
-    Lt,
-    Contains,
-    NotContains,
-    SumOf,
-    ProductOf,
-    MaxOf,
-}
-
-impl From<NativeStatement> for middleware::NativeStatement {
-    fn from(v: NativeStatement) -> Self {
-        Self::from_repr(v as usize).unwrap()
+    pub fn verify(&self) -> bool {
+        self.pod.verify()
+    }
+    pub fn kvs(&self) -> HashMap<Hash, middleware::Value> {
+        self.pod.kvs()
     }
 }
 
@@ -152,45 +140,15 @@ pub struct AnchoredKey(pub Origin, pub String);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatementArg {
     Literal(Value),
-    Ref(AnchoredKey),
+    Key(AnchoredKey),
 }
 
 impl fmt::Display for StatementArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Literal(v) => write!(f, "{}", v),
-            Self::Ref(r) => write!(f, "{}.{}", r.0 .1, r.1),
+            Self::Key(r) => write!(f, "{}.{}", r.0 .1, r.1),
         }
-    }
-}
-
-impl From<Value> for StatementArg {
-    fn from(v: Value) -> Self {
-        StatementArg::Literal(v)
-    }
-}
-
-impl From<&str> for StatementArg {
-    fn from(s: &str) -> Self {
-        StatementArg::Literal(Value::from(s))
-    }
-}
-
-impl From<i64> for StatementArg {
-    fn from(v: i64) -> Self {
-        StatementArg::Literal(Value::from(v))
-    }
-}
-
-impl From<(Origin, &str)> for StatementArg {
-    fn from((origin, key): (Origin, &str)) -> Self {
-        StatementArg::Ref(AnchoredKey(origin, key.to_string()))
-    }
-}
-
-impl From<(&SignedPod, &str)> for StatementArg {
-    fn from((pod, key): (&SignedPod, &str)) -> Self {
-        StatementArg::Ref(AnchoredKey(pod.origin(), key.to_string()))
     }
 }
 
@@ -214,6 +172,44 @@ impl fmt::Display for Statement {
 pub enum OperationArg {
     Statement(Statement),
     Key(AnchoredKey),
+    Literal(Value),
+    Entry(String, Value),
+}
+
+impl From<Value> for OperationArg {
+    fn from(v: Value) -> Self {
+        Self::Literal(v)
+    }
+}
+
+impl From<&Value> for OperationArg {
+    fn from(v: &Value) -> Self {
+        Self::Literal(v.clone())
+    }
+}
+
+impl From<&str> for OperationArg {
+    fn from(s: &str) -> Self {
+        Self::Literal(Value::from(s))
+    }
+}
+
+impl From<i64> for OperationArg {
+    fn from(v: i64) -> Self {
+        Self::Literal(Value::from(v))
+    }
+}
+
+impl From<(Origin, &str)> for OperationArg {
+    fn from((origin, key): (Origin, &str)) -> Self {
+        Self::Key(AnchoredKey(origin, key.to_string()))
+    }
+}
+
+impl From<(&SignedPod, &str)> for OperationArg {
+    fn from((pod, key): (&SignedPod, &str)) -> Self {
+        Self::Key(AnchoredKey(pod.origin(), key.to_string()))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,17 +218,29 @@ pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 #[derive(Debug)]
 pub struct MainPodBuilder {
     pub params: Params,
-    pub input_signed_pods: Vec<Box<dyn middleware::SignedPod>>,
-    pub input_main_pods: Vec<Box<dyn middleware::MainPod>>,
+    pub input_signed_pods: Vec<SignedPod>,
+    pub input_main_pods: Vec<MainPod>,
     pub statements: Vec<Statement>,
     pub operations: Vec<Operation>,
+    // Internal state
+    const_cnt: usize,
 }
 
 impl MainPodBuilder {
-    pub fn add_signed_pod(&mut self, pod: Box<dyn middleware::SignedPod>) {
-        self.input_signed_pods.push(pod);
+    pub fn new(params: &Params) -> Self {
+        Self {
+            params: params.clone(),
+            input_signed_pods: Vec::new(),
+            input_main_pods: Vec::new(),
+            statements: Vec::new(),
+            operations: Vec::new(),
+            const_cnt: 0,
+        }
     }
-    pub fn add_main_pod(&mut self, pod: Box<dyn middleware::MainPod>) {
+    pub fn add_signed_pod(&mut self, pod: &SignedPod) {
+        self.input_signed_pods.push(pod.clone());
+    }
+    pub fn add_main_pod(&mut self, pod: MainPod) {
         self.input_main_pods.push(pod);
     }
     pub fn insert(&mut self, st_op: (Statement, Operation)) {
@@ -241,17 +249,85 @@ impl MainPodBuilder {
         self.operations.push(op);
     }
 
+    /// Convert [OperationArg]s to [StatementArg]s for the operations that work with entries
+    fn op_args_entries(&mut self, args: &mut [OperationArg]) -> Vec<StatementArg> {
+        let mut st_args = Vec::new();
+        for arg in args.iter_mut() {
+            match arg {
+                OperationArg::Statement(s) => panic!("can't convert Statement to StatementArg"),
+                OperationArg::Key(k) => st_args.push(StatementArg::Key(k.clone())),
+                OperationArg::Literal(v) => {
+                    let k = format!("c{}", self.const_cnt);
+                    self.const_cnt += 1;
+                    let value_of_st = self.op(Operation(
+                        NativeOperation::NewEntry,
+                        vec![OperationArg::Entry(k.clone(), v.clone())],
+                    ));
+                    *arg = OperationArg::Key(AnchoredKey(Origin(PodClass::Main, SELF), k.clone()));
+                    st_args.push(value_of_st.1[0].clone())
+                }
+                OperationArg::Entry(k, v) => {
+                    st_args.push(StatementArg::Key(AnchoredKey(
+                        Origin(PodClass::Main, SELF),
+                        k.clone(),
+                    )));
+                    st_args.push(StatementArg::Literal(v.clone()))
+                }
+            };
+        }
+        st_args
+    }
+
+    pub fn op(&mut self, mut op: Operation) -> &Statement {
+        use NativeOperation::*;
+        let Operation(op_type, ref mut args) = op;
+        // TODO: argument type checking
+        let st = match op_type {
+            None => Statement(NativeStatement::None, vec![]),
+            NewEntry => Statement(NativeStatement::ValueOf, self.op_args_entries(args)),
+            CopyStatement => todo!(),
+            EqualFromEntries => Statement(NativeStatement::Equal, self.op_args_entries(args)),
+            NotEqualFromEntries => Statement(NativeStatement::NotEqual, self.op_args_entries(args)),
+            GtFromEntries => Statement(NativeStatement::Gt, self.op_args_entries(args)),
+            LtFromEntries => Statement(NativeStatement::Lt, self.op_args_entries(args)),
+            TransitiveEqualFromStatements => todo!(),
+            GtToNotEqual => todo!(),
+            LtToNotEqual => todo!(),
+            ContainsFromEntries => Statement(NativeStatement::Contains, self.op_args_entries(args)),
+            NotContainsFromEntries => {
+                Statement(NativeStatement::NotContains, self.op_args_entries(args))
+            }
+            RenameContainedBy => todo!(),
+            SumOf => todo!(),
+            ProductOf => todo!(),
+            MaxOf => todo!(),
+        };
+        self.operations.push(op);
+        self.statements.push(st);
+        &self.statements[self.statements.len() - 1]
+    }
+
     pub fn prove<P: PodProver>(&self, prover: &mut P) -> MainPod {
         let compiler = MainPodCompiler::new(&self.params);
         let inputs = MainPodCompilerInputs {
+            // signed_pods: &self.input_signed_pods,
+            // main_pods: &self.input_main_pods,
             statements: &self.statements,
             operations: &self.operations,
         };
         let (statements, operations) = compiler.compile(inputs).expect("TODO");
 
         let inputs = middleware::MainPodInputs {
-            signed_pods: &self.input_signed_pods,
-            main_pods: &self.input_main_pods,
+            signed_pods: &self
+                .input_signed_pods
+                .iter()
+                .map(|p| p.pod.as_ref())
+                .collect_vec(),
+            main_pods: &self
+                .input_main_pods
+                .iter()
+                .map(|p| p.pod.as_ref())
+                .collect_vec(),
             statements: &statements,
             operations: &operations,
         };
@@ -271,20 +347,19 @@ impl MainPod {
         self.pod.id()
     }
     pub fn origin(&self) -> Origin {
-        Origin(PodType::Signed, self.id())
+        Origin(PodClass::Signed, self.id())
     }
 }
 
 struct MainPodCompilerInputs<'a> {
+    // pub signed_pods: &'a [Box<dyn middleware::SignedPod>],
+    // pub main_pods: &'a [Box<dyn middleware::MainPod>],
     pub statements: &'a [Statement],
     pub operations: &'a [Operation],
 }
 
 struct MainPodCompiler {
     params: Params,
-    // Internal state
-    const_cnt: usize,
-    front_operations: Vec<Operation>,
     // Output
     statements: Vec<middleware::Statement>,
     operations: Vec<middleware::Operation>,
@@ -294,8 +369,6 @@ impl MainPodCompiler {
     fn new(params: &Params) -> Self {
         Self {
             params: params.clone(),
-            const_cnt: 0,
-            front_operations: Vec::new(),
             statements: Vec::new(),
             operations: Vec::new(),
         }
@@ -305,41 +378,63 @@ impl MainPodCompiler {
         self.params.max_statements - self.params.max_public_statements
     }
 
-    fn push_st_front_op(&mut self, st: middleware::Statement, op: Operation) {
+    fn push_st_op(&mut self, st: middleware::Statement, op: middleware::Operation) {
         self.statements.push(st);
-        self.front_operations.push(op);
+        self.operations.push(op);
     }
 
-    fn compile_st(&mut self, st: &Statement, op: &Operation) {
+    fn compile_op_arg(&self, op_arg: &OperationArg) -> middleware::OperationArg {
+        match op_arg {
+            OperationArg::Statement(s) => middleware::OperationArg::Statement(self.compile_st(s)),
+            OperationArg::Key(k) => middleware::OperationArg::Key(Self::compile_anchored_key(k)),
+            OperationArg::Literal(_v) => {
+                // OperationArg::Literal is a syntax sugar for the frontend.  This is translated to
+                // a new ValueOf statement and it's key used instead.
+                unreachable!()
+            }
+            OperationArg::Entry(_k, _v) => {
+                // OperationArg::Entry is only used in the frontend.  The (key, value) will only
+                // appear in the ValueOf statement in the backend.
+                middleware::OperationArg::None
+            }
+        }
+    }
+
+    fn compile_anchored_key(key: &AnchoredKey) -> middleware::AnchoredKey {
+        middleware::AnchoredKey(key.0 .1, hash_str(&key.1))
+    }
+
+    fn compile_st(&self, st: &Statement) -> middleware::Statement {
         let mut st_args = Vec::new();
         let Statement(front_st_typ, front_st_args) = st;
         for front_st_arg in front_st_args {
-            let key = match front_st_arg {
+            match front_st_arg {
                 StatementArg::Literal(v) => {
-                    let key = format!("_c{}", self.const_cnt);
-                    let key_hash = hash_str(&key);
-                    self.const_cnt += 1;
-                    let value_of_args = vec![
-                        middleware::StatementArg::Ref(middleware::AnchoredKey(SELF, key_hash)),
-                        middleware::StatementArg::Literal(middleware::Value::from(v)),
-                    ];
-                    self.push_st_front_op(
-                        middleware::Statement(middleware::NativeStatement::ValueOf, value_of_args),
-                        Operation(middleware::NativeOperation::NewEntry, vec![]),
-                    );
-                    middleware::AnchoredKey(SELF, key_hash)
+                    st_args.push(middleware::StatementArg::Literal(middleware::Value::from(
+                        v,
+                    )));
                 }
-                StatementArg::Ref(k) => middleware::AnchoredKey(k.0 .1, hash_str(&k.1)),
+                StatementArg::Key(k) => {
+                    let key = Self::compile_anchored_key(k);
+                    st_args.push(middleware::StatementArg::Key(key));
+                }
             };
-            st_args.push(middleware::StatementArg::Ref(key));
             if st_args.len() > self.params.max_statement_args {
                 panic!("too many statement st_args");
             }
         }
 
-        self.push_st_front_op(
-            middleware::Statement(middleware::NativeStatement::from(*front_st_typ), st_args),
-            op.clone(),
+        middleware::Statement(*front_st_typ, st_args)
+    }
+
+    fn compile_st_op(&mut self, st: &Statement, op: &Operation) {
+        let middle_st = self.compile_st(st);
+        self.push_st_op(
+            middle_st,
+            middleware::Operation(
+                op.0,
+                op.1.iter().map(|arg| self.compile_op_arg(arg)).collect(),
+            ),
         );
     }
 
@@ -348,11 +443,13 @@ impl MainPodCompiler {
         inputs: MainPodCompilerInputs<'a>,
     ) -> Result<(Vec<middleware::Statement>, Vec<middleware::Operation>)> {
         let MainPodCompilerInputs {
+            // signed_pods: _,
+            // main_pods: _,
             statements,
             operations,
         } = inputs;
         for (st, op) in statements.iter().zip_eq(operations.iter()) {
-            self.compile_st(st, op);
+            self.compile_st_op(st, op);
             if self.statements.len() > self.params.max_statements {
                 panic!("too many statements");
             }
@@ -367,7 +464,9 @@ impl Printer {
     pub fn fmt_op_arg(&self, w: &mut dyn Write, arg: &OperationArg) -> io::Result<()> {
         match arg {
             OperationArg::Statement(s) => write!(w, "{}", s),
-            OperationArg::Key(r) => write!(w, "{}.{}", r.0 .1, r.1),
+            OperationArg::Key(k) => write!(w, "{}.{}", k.0 .1, k.1),
+            OperationArg::Literal(v) => write!(w, "{}", v),
+            OperationArg::Entry(k, v) => write!(w, "({}, {})", k, v),
         }
     }
 
@@ -381,6 +480,8 @@ impl Printer {
         }
         Ok(())
     }
+
+    // TODO fn fmt_signed_pod_builder
 
     pub fn fmt_signed_pod(&self, w: &mut dyn Write, pod: &SignedPod) -> io::Result<()> {
         writeln!(w, "SignedPod (id:{}):", pod.id())?;
@@ -412,11 +513,14 @@ impl Printer {
         }
         Ok(())
     }
+
+    // TODO fn fmt_main_pod
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::backends::mock_signed::MockSigner;
     use crate::middleware::Hash;
     use hex::FromHex;
     use std::io;
@@ -425,76 +529,82 @@ pub mod tests {
         PodId(Hash::from_hex(hex).unwrap())
     }
 
-    fn auto() -> Operation {
-        Operation(NativeOperation::Auto, vec![])
-    }
-
     macro_rules! args {
-        ($($arg:expr),+) => {vec![$(StatementArg::from($arg)),*]}
+        ($($arg:expr),+) => {vec![$(OperationArg::from($arg)),*]}
     }
 
-    macro_rules! st {
-        (eq, $($arg:expr),+) => { Statement(NativeStatement::Equal, args!($($arg),*)) };
-        (ne, $($arg:expr),+) => { Statement(NativeStatement::NotEqual, args!($($arg),*)) };
-        (gt, $($arg:expr),+) => { Statement(NativeStatement::Gt, args!($($arg),*)) };
-        (lt, $($arg:expr),+) => { Statement(NativeStatement::Lt, args!($($arg),*)) };
-        (contains, $($arg:expr),+) => { Statement(NativeStatement::Contains, args!($($arg),*)) };
-        (not_contains, $($arg:expr),+) => { Statement(NativeStatement::NotContains, args!($($arg),*)) };
-        (sum_of, $($arg:expr),+) => { Statement(NativeStatement::SumOf, args!($($arg),*)) };
-        (product_of, $($arg:expr),+) => { Statement(NativeStatement::product_of, args!($($arg),*)) };
-        (max_of, $($arg:expr),+) => { Statement(NativeStatement::max_of, args!($($arg),*)) };
+    macro_rules! op {
+        (eq, $($arg:expr),+) => { Operation(NativeOperation::EqualFromEntries, args!($($arg),*)) };
+        (ne, $($arg:expr),+) => { Operation(NativeOperation::NotEqualFromEntries, args!($($arg),*)) };
+        (gt, $($arg:expr),+) => { Operation(NativeOperation::GtFromEntries, args!($($arg),*)) };
+        (lt, $($arg:expr),+) => { Operation(NativeOperation::LtFromEntries, args!($($arg),*)) };
+        (contains, $($arg:expr),+) => { Operation(NativeOperation::ContainsFromEntries, args!($($arg),*)) };
+        (not_contains, $($arg:expr),+) => { Operation(NativeOperation::NotContainsFromEntries, args!($($arg),*)) };
     }
 
-    pub fn data_zu_kyc(params: Params) -> Result<(SignedPod, SignedPod, MainPod)> {
-        let mut kvs = HashMap::new();
-        kvs.insert("idNumber".into(), "4242424242".into());
-        kvs.insert("dateOfBirth".into(), 1169909384.into());
-        kvs.insert("socialSecurityNumber".into(), "G2121210".into());
-        let gov_id = SignedPod::new(&params, kvs)?;
+    pub fn zu_kyc_sign_pod_builders(params: &Params) -> (SignedPodBuilder, SignedPodBuilder) {
+        let mut gov_id = SignedPodBuilder::new(params);
+        gov_id.insert("idNumber", "4242424242");
+        gov_id.insert("dateOfBirth", 1169909384);
+        gov_id.insert("socialSecurityNumber", "G2121210");
 
-        let mut kvs = HashMap::new();
-        kvs.insert("socialSecurityNumber".into(), "G2121210".into());
-        kvs.insert("startDate".into(), 1706367566.into());
-        let pay_stub = SignedPod::new(&params, kvs)?;
+        let mut pay_stub = SignedPodBuilder::new(params);
+        pay_stub.insert("socialSecurityNumber", "G2121210");
+        pay_stub.insert("startDate", 1706367566);
 
+        (gov_id, pay_stub)
+    }
+
+    pub fn zu_kyc_pod_builder(
+        params: &Params,
+        gov_id: &SignedPod,
+        pay_stub: &SignedPod,
+    ) -> MainPodBuilder {
         let sanction_list = Value::MerkleTree(MerkleTree { root: 1 });
         let now_minus_18y: i64 = 1169909388;
         let now_minus_1y: i64 = 1706367566;
-        let mut statements: Vec<(Statement, Operation)> = Vec::new();
-        statements.push((
-            st!(not_contains, sanction_list, (&gov_id, "idNumber")),
-            auto(),
-        ));
-        statements.push((st!(lt, (&gov_id, "dateOfBirth"), now_minus_18y), auto()));
-        statements.push((
-            st!(
-                eq,
-                (&gov_id, "socialSecurityNumber"),
-                (&pay_stub, "socialSecurityNumber")
-            ),
-            auto(),
-        ));
-        statements.push((st!(eq, (&pay_stub, "startDate"), now_minus_1y), auto()));
-        let kyc = MainPod {
-            params: params.clone(),
-            id: pod_id("3300000000000000000000000000000000000000000000000000000000000000"),
-            input_signed_pods: vec![gov_id.clone(), pay_stub.clone()],
-            input_main_pods: vec![],
-            statements,
-        };
 
-        Ok((gov_id, pay_stub, kyc))
+        let mut kyc = MainPodBuilder::new(&params);
+        kyc.add_signed_pod(&gov_id);
+        kyc.add_signed_pod(&pay_stub);
+        kyc.op(op!(not_contains, &sanction_list, (gov_id, "idNumber")));
+        kyc.op(op!(lt, (gov_id, "dateOfBirth"), now_minus_18y));
+        kyc.op(op!(
+            eq,
+            (gov_id, "socialSecurityNumber"),
+            (pay_stub, "socialSecurityNumber")
+        ));
+        kyc.op(op!(eq, (pay_stub, "startDate"), now_minus_1y));
+
+        kyc
     }
 
     #[test]
     fn test_front_0() -> Result<()> {
-        let (gov_id, pay_stub, kyc) = data_zu_kyc(Params::default())?;
-
         let printer = Printer {};
         let mut w = io::stdout();
+
+        let params = Params::default();
+        let (gov_id, pay_stub) = zu_kyc_sign_pod_builders(&params);
+
+        // TODO: print pods from the builder
+
+        let mut signer = MockSigner {
+            pk: "ZooGov".into(),
+        };
+        let gov_id = gov_id.sign(&mut signer);
         printer.fmt_signed_pod(&mut w, &gov_id).unwrap();
+
+        let mut signer = MockSigner {
+            pk: "ZooDeel".into(),
+        };
+        let pay_stub = pay_stub.sign(&mut signer);
         printer.fmt_signed_pod(&mut w, &pay_stub).unwrap();
-        printer.fmt_main_pod(&mut w, &kyc).unwrap();
+
+        let kyc = zu_kyc_pod_builder(&params, &gov_id, &pay_stub);
+        printer.fmt_main_pod_builder(&mut w, &kyc).unwrap();
+
+        // TODO: prove kyc with MockProver and print it
 
         Ok(())
     }
