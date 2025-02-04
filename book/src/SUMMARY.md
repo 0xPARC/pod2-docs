@@ -12,4 +12,5 @@
 	- [SignedPOD](./signedpod.md)
 	- [MainPOD](./mainpod.md)
 	- [MockPOD](./mockpod.md)
+- [POD value types](./values.md)
 - [Examples](./examples.md)

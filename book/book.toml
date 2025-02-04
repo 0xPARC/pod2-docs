@@ -7,3 +7,6 @@ title = "POD2-docs"
 
 [output.html]
 default-theme = "light"
+
+[preprocessor.katex]
+after = ["links"]
