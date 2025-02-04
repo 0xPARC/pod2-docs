@@ -32,8 +32,8 @@ The following table summarises the natively-supported statements, where we write
 |------|-------------|---------------------|-------------------------------------------------------------------|
 | 0    | `None`      |                     | no statement (useful for padding)                                 |
 | 1    | `ValueOf`   | `ak`, `value`       | `value_of(ak) = value`                                            |
-| 2    | `Equal`     | `ak1`, `ak2`        | `value_of(ak1) = value_of(ak2)`                                   |
-| 3    | `NotEqual`  | `ak1`, `ak2`        | `value_of(ak1) != value_of(ak2)`                                  |
+| 2    | `Eq`        | `ak1`, `ak2`        | `value_of(ak1) = value_of(ak2)`                                   |
+| 3    | `NEq`       | `ak1`, `ak2`        | `value_of(ak1) != value_of(ak2)`                                  |
 | 4    | `Gt`        | `ak1`, `ak2`        | `value_of(ak1) > value_of(ak2)`                                   |
 | 5    | `LEq`       | `ak1`, `ak2`        | `value_of(ak1) <= value_of(ak2)`                                  |
 | 6    | `Contains`  | `ak1`, `ak2`        | `(key_of(ak2), value_of(ak2)) ∈ value_of(ak1)` (Merkle inclusion) |
