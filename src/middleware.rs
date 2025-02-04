@@ -1,11 +1,14 @@
 //! The middleware includes the type definitions and the traits used to connect the frontend and
 //! the backend.
 
+use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
+use itertools::Itertools;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
+use std::any::Any;
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;
 use std::fmt;
@@ -188,14 +191,33 @@ impl Default for Params {
     }
 }
 
-pub trait SignedPod: fmt::Debug {
+pub trait SignedPod: fmt::Debug + DynClone {
     fn verify(&self) -> bool;
     fn id(&self) -> PodId;
     // NOTE: Maybe replace this by
     // - `get(key: Hash) -> Option<Value>`
     // - `iter() -> impl Iter<(Hash, Value)>`
     fn kvs(&self) -> HashMap<Hash, Value>;
+    fn pub_statements(&self) -> Vec<Statement> {
+        let id = self.id();
+        let mut statements = Vec::new();
+        for (k, v) in self.kvs().iter().sorted_by_key(|kv| kv.0) {
+            statements.push(Statement(
+                NativeStatement::ValueOf,
+                vec![
+                    StatementArg::Key(AnchoredKey(id, *k)),
+                    StatementArg::Literal(*v),
+                ],
+            ));
+        }
+        statements
+    }
+    // Used for downcasting
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
+
+// impl Clone for Box<dyn SignedPod>
+dyn_clone::clone_trait_object!(SignedPod);
 
 pub trait PodSigner {
     fn sign(&mut self, params: &Params, kvs: &HashMap<Hash, Value>) -> Box<dyn SignedPod>;
@@ -223,7 +245,7 @@ pub struct AnchoredKey(pub PodId, pub Hash);
 pub enum StatementArg {
     None,
     Literal(Value),
-    Ref(AnchoredKey),
+    Key(AnchoredKey),
 }
 
 impl StatementArg {
@@ -241,27 +263,29 @@ impl Statement {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeOperation {
     None = 0,
     NewEntry = 1,
     CopyStatement = 2,
-    EqualityFromEntries = 3,
-    NonequalityFromEntries = 4,
+    EqualFromEntries = 3,
+    NotEqualFromEntries = 4,
     GtFromEntries = 5,
     LtFromEntries = 6,
-    TransitiveEqualityFromStatements = 7,
-    GtToNonequality = 8,
-    LtToNonequality = 9,
+    TransitiveEqualFromStatements = 7,
+    GtToNotEqual = 8,
+    LtToNotEqual = 9,
     ContainsFromEntries = 10,
-    RenameContainedBy = 11,
-    SumOf = 12,
-    ProductOf = 13,
-    MaxOf = 14,
+    NotContainsFromEntries = 11,
+    RenameContainedBy = 12,
+    SumOf = 13,
+    ProductOf = 14,
+    MaxOf = 15,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperationArg {
+    None,
     Statement(Statement),
     Key(AnchoredKey),
 }
@@ -269,15 +293,21 @@ pub enum OperationArg {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
-pub trait MainPod: fmt::Debug {
+pub trait MainPod: fmt::Debug + DynClone {
     fn verify(&self) -> bool;
     fn id(&self) -> PodId;
+    fn pub_statements(&self) -> Vec<Statement>;
+    // Used for downcasting
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
+
+// impl Clone for Box<dyn SignedPod>
+dyn_clone::clone_trait_object!(MainPod);
 
 #[derive(Debug)]
 pub struct MainPodInputs<'a> {
-    pub signed_pods: &'a [Box<dyn SignedPod>],
-    pub main_pods: &'a [Box<dyn MainPod>],
+    pub signed_pods: &'a [&'a dyn SignedPod],
+    pub main_pods: &'a [&'a dyn MainPod],
     pub statements: &'a [Statement],
     pub operations: &'a [Operation],
 }

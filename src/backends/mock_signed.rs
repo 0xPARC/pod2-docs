@@ -2,6 +2,7 @@ use crate::middleware::{
     hash_str, Hash, Params, PodId, PodSigner, PodType, SignedPod, Value, KEY_SIGNER, KEY_TYPE,
 };
 use itertools::Itertools;
+use std::any::Any;
 use std::collections::HashMap;
 
 pub struct MockSigner {
@@ -73,6 +74,10 @@ impl SignedPod for MockSignedPod {
     fn kvs(&self) -> HashMap<Hash, Value> {
         self.kvs.clone()
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -85,13 +90,14 @@ pub mod tests {
     #[test]
     fn test_mock_signed_0() {
         let params = middleware::Params::default();
-        let mut pod = frontend::SignedPodBuilder::new(params);
+        let mut pod = frontend::SignedPodBuilder::new(&params);
         pod.insert("idNumber", "4242424242");
         pod.insert("dateOfBirth", 1169909384);
         pod.insert("socialSecurityNumber", "G2121210");
 
         let mut signer = MockSigner { pk: "Molly".into() };
         let pod = pod.sign(&mut signer);
+        let pod = pod.pod.into_any().downcast::<MockSignedPod>().unwrap();
 
         assert_eq!(pod.verify(), true);
         println!("id: {}", pod.id());

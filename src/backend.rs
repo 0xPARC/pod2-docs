@@ -1,3 +1,6 @@
+// TODO: Move the SignedPod.id calculation to mock_signed
+// TODO: Move the MainPod logic to mock_main and implement the MainPod trait
+/*
 use anyhow::Result;
 use itertools::Itertools;
 use plonky2::field::types::{Field, PrimeField64};
@@ -8,7 +11,6 @@ use std::iter;
 use crate::merkletree::MerkleTree;
 use crate::middleware::{Hash, Params, PodId, Value, NULL};
 
-/*
 #[derive(Clone, Debug)]
 pub struct SignedPod {
     pub params: Params,
