@@ -347,7 +347,7 @@ impl MainPod {
         self.pod.id()
     }
     pub fn origin(&self) -> Origin {
-        Origin(PodClass::Signed, self.id())
+        Origin(PodClass::Main, self.id())
     }
 }
 
