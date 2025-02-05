@@ -1,9 +1,11 @@
 use crate::middleware::{
-    self, MainPod, MainPodInputs, NativeOperation, NativeStatement, NoneMainPod, NoneSignedPod,
-    Params, PodId, PodProver, SignedPod, Statement, StatementArg,
+    self, Hash, MainPod, MainPodInputs, NativeOperation, NativeStatement, NoneMainPod,
+    NoneSignedPod, Params, PodId, PodProver, SignedPod, Statement, StatementArg, ToFields,
 };
 use anyhow::Result;
 use itertools::Itertools;
+use plonky2::hash::poseidon::PoseidonHash;
+use plonky2::plonk::config::Hasher;
 use std::any::Any;
 use std::io::{self, Write};
 
@@ -156,7 +158,7 @@ impl MockMainPod {
         }
     }
 
-    fn process_priavte_statements_operations(
+    fn process_private_statements_operations(
         params: &Params,
         statements: &[Statement],
         input_operations: &[middleware::Operation],
@@ -207,12 +209,12 @@ impl MockMainPod {
     pub fn new(params: &Params, inputs: MainPodInputs) -> Result<Self> {
         // TODO: Figure out a way to handle public statements.  For example, in the public slots
         // use copy operations taking the private statements that need to be public.  We may change
-        // the MainPodInputs type to accomodate for that.
+        // the MainPodInputs type to accommodate for that.
         // TODO: Insert a new public statement of ValueOf with `key=KEY_TYPE,
         // value=PodType::MockMainPod`
         let statements = Self::layout_statements(params, &inputs);
         let operations =
-            Self::process_priavte_statements_operations(params, &statements, inputs.operations);
+            Self::process_private_statements_operations(params, &statements, inputs.operations);
         let operations =
             Self::process_public_statements_operations(params, &statements, operations);
 
@@ -225,12 +227,12 @@ impl MockMainPod {
         let input_statements = inputs.statements.iter().cloned().collect_vec();
         let public_statements = inputs.public_statements.iter().cloned().collect_vec();
 
-        // TODO: Calculate the PodId from a subset of the `statements` vector.  For example it
-        // could be the public subset (which is the last `params.max_public_statements` of the
-        // vector`).
+        // get the id out of the public statements
+        let id: PodId = PodId(hash_statements(&public_statements)?);
+
         Ok(Self {
             params: params.clone(),
-            id: PodId::default(), // TODO
+            id,
             input_signed_pods,
             input_main_pods,
             input_statements,
@@ -263,6 +265,18 @@ impl MockMainPod {
             params.max_operation_args,
         )
     }
+}
+
+pub fn hash_statements(statements: &[middleware::Statement]) -> Result<middleware::Hash> {
+    let (field_elems, _) = statements
+        .into_iter()
+        .map(|statement| statement.clone().to_fields())
+        .fold((Vec::new(), 0), |mut acc, (f, l)| {
+            acc.0.extend(f);
+            acc.1 += l;
+            acc
+        });
+    Ok(Hash(PoseidonHash::hash_no_pad(&field_elems).elements))
 }
 
 impl MainPod for MockMainPod {
@@ -410,20 +424,20 @@ pub mod tests {
     fn test_mock_main_0() {
         let params = middleware::Params::default();
 
-        let (gov_id, pay_stub) = frontend::tests::zu_kyc_sign_pod_builders(&params);
+        let (gov_id_builder, pay_stub_builder) = frontend::tests::zu_kyc_sign_pod_builders(&params);
         let mut signer = MockSigner {
             pk: "ZooGov".into(),
         };
-        let gov_id = gov_id.sign(&mut signer).unwrap();
+        let gov_id_pod = gov_id_builder.sign(&mut signer).unwrap();
         let mut signer = MockSigner {
             pk: "ZooDeel".into(),
         };
-        let pay_stub = pay_stub.sign(&mut signer).unwrap();
-        let kyc = frontend::tests::zu_kyc_pod_builder(&params, &gov_id, &pay_stub);
+        let pay_stub_pod = pay_stub_builder.sign(&mut signer).unwrap();
+        let kyc_builder = frontend::tests::zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod);
 
         let mut prover = MockProver {};
-        let kyc = kyc.prove(&mut prover).unwrap();
-        let pod = kyc.pod.into_any().downcast::<MockMainPod>().unwrap();
+        let kyc_pod = kyc_builder.prove(&mut prover).unwrap();
+        let pod = kyc_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
 
         let printer = Printer { skip_none: false };
         let mut w = io::stdout();

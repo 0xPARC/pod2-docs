@@ -343,7 +343,6 @@ impl MainPodBuilder {
         };
         let (statements, operations, public_statements) = compiler.compile(inputs)?;
 
-        // TODO: Add API to specify public/private statement
         let inputs = MainPodInputs {
             signed_pods: &self.input_signed_pods.iter().map(|p| &p.pod).collect_vec(),
             main_pods: &self.input_main_pods.iter().map(|p| &p.pod).collect_vec(),

@@ -17,6 +17,7 @@ use strum_macros::FromRepr;
 
 pub const KEY_SIGNER: &str = "_signer";
 pub const KEY_TYPE: &str = "_type";
+pub const STATEMENT_ARG_F_LEN: usize = 8;
 
 /// F is the native field we use everywhere.  Currently it's Goldilocks from plonky2
 pub type F = GoldilocksField;
@@ -74,6 +75,12 @@ impl fmt::Display for Value {
 #[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq)]
 pub struct Hash(pub [F; 4]);
 
+impl ToFields for Hash {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        (self.0.to_vec(), 4)
+    }
+}
+
 impl Ord for Hash {
     fn cmp(&self, other: &Self) -> Ordering {
         Value(self.0).cmp(&Value(other.0))
@@ -116,6 +123,12 @@ impl FromHex for Hash {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct PodId(pub Hash);
+
+impl ToFields for PodId {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        self.0.to_fields()
+    }
+}
 
 pub const SELF: PodId = PodId(Hash([F::ONE, F::ZERO, F::ZERO, F::ZERO]));
 
@@ -264,6 +277,12 @@ pub enum NativeStatement {
     MaxOf = 10,
 }
 
+impl ToFields for NativeStatement {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        (vec![F::from_canonical_u64(self as u64)], 1)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnchoredKey(pub PodId, pub Hash);
 
@@ -280,12 +299,61 @@ impl StatementArg {
     }
 }
 
+impl ToFields for StatementArg {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        // NOTE: current version returns always the same amount of field elements in the returned
+        // vector, which means that the `None` case is padded with 8 zeroes, and the `Literal` case
+        // is padded with 4 zeroes. Since the returned vector will mostly be hashed (and reproduced
+        // in-circuit), we might be interested into reducing the length of it. If that's the case,
+        // we can check if it makes sense to make it dependant on the concrete StatementArg; that
+        // is, when dealing with a `None` it would be a single field element (zero value), and when
+        // dealing with `Literal` it would be of length 4.
+        let f = match self {
+            StatementArg::None => vec![F::ZERO; STATEMENT_ARG_F_LEN],
+            StatementArg::Literal(v) => {
+                let value_f = v.0.to_vec();
+                [
+                    value_f.clone(),
+                    vec![F::ZERO; STATEMENT_ARG_F_LEN - value_f.len()],
+                ]
+                .concat()
+            }
+            StatementArg::Key(ak) => {
+                let (podid_f, _) = ak.0.to_fields();
+                let (hash_f, _) = ak.1.to_fields();
+                [podid_f, hash_f].concat()
+            }
+        };
+        assert_eq!(f.len(), STATEMENT_ARG_F_LEN); // sanity check
+        (f, STATEMENT_ARG_F_LEN)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
 
 impl Statement {
     pub fn is_none(&self) -> bool {
         matches!(self.0, NativeStatement::None)
+    }
+}
+
+impl ToFields for Statement {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        let (native_statement_f, native_statement_f_len) = self.0.to_fields();
+        let (vec_statementarg_f, vec_statementarg_f_len) = self
+            .1
+            .into_iter()
+            .map(|statement_arg| statement_arg.to_fields())
+            .fold((Vec::new(), 0), |mut acc, (f, l)| {
+                acc.0.extend(f);
+                acc.1 += l;
+                acc
+            });
+        (
+            [native_statement_f, vec_statementarg_f].concat(),
+            native_statement_f_len + vec_statementarg_f_len,
+        )
     }
 }
 
@@ -350,9 +418,6 @@ impl MainPod for NoneMainPod {
     }
 }
 
-// TODO: Figure out a way to signal which signed_pods entries and which main_pods statements need
-// to be made public.  Idea: introduce an operation called reveal, which the backend translates to
-// CopyOf but moves copies that statement to a public slot?
 #[derive(Debug)]
 pub struct MainPodInputs<'a> {
     pub signed_pods: &'a [&'a Box<dyn SignedPod>],
@@ -366,4 +431,10 @@ pub struct MainPodInputs<'a> {
 
 pub trait PodProver {
     fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Result<Box<dyn MainPod>>;
+}
+
+pub trait ToFields {
+    /// returns Vec<F> representation of the type, and a usize indicating how many field elements
+    /// does the vector contain
+    fn to_fields(self) -> (Vec<F>, usize);
 }
