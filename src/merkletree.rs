@@ -31,7 +31,7 @@ pub struct MerkleTree {
     // kvs are a field in the MerkleTree in order to be able to iterate over the keyvalues. This is
     // specific of the current implementation (Plonky2's tree wrapper), in the next iteration this
     // will not be needed since the tree implementation itself will offer the hashmap
-    // functionallity.
+    // functionality.
     kvs: HashMap<Hash, Value>,
 }
 

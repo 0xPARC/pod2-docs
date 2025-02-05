@@ -58,7 +58,7 @@ statement loan_check(receiver: PubKey):
          - lt(paystub.start_date, NOW_MINUS_1Y) # start_date is more than 1y old
          - gt(paystub.issue_date, NOW_MINUS_7D) # issue_date is less than 7d old
          # Annual salary is at least $20,000
-         - gt(paystub.anual_salary, 20000)
+         - gt(paystub.annual_salary, 20000)
 ```
 
 ## ZuKYC (simplified for P1)
