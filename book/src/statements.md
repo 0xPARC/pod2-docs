@@ -27,7 +27,7 @@ SumOf(AnchoredKey, AnchoredKey, AnchoredKey),
 ProductOf(AnchoredKey, AnchoredKey, AnchoredKey),
 MaxOf(AnchoredKey, AnchoredKey, AnchoredKey),
 Branches(AnchoredKey, AnchoredKey, AnchoredKey),
-Leaf(AnchoredKey, AnchoredKey),
+Leaf(AnchoredKey, AnchoredKey, AnchoredKey),
 GoesLeft(AnchoredKey, AnchoredKey),
 GoesRight(AnchoredKey, AnchoredKey),
 Contains(AnchoredKey, AnchoredKey)
