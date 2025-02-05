@@ -222,6 +222,7 @@ pub struct MainPodBuilder {
     pub input_main_pods: Vec<MainPod>,
     pub statements: Vec<Statement>,
     pub operations: Vec<Operation>,
+    pub public_statements: Vec<Statement>,
     // Internal state
     const_cnt: usize,
 }
@@ -234,6 +235,7 @@ impl MainPodBuilder {
             input_main_pods: Vec::new(),
             statements: Vec::new(),
             operations: Vec::new(),
+            public_statements: Vec::new(),
             const_cnt: 0,
         }
     }
@@ -250,7 +252,7 @@ impl MainPodBuilder {
     }
 
     /// Convert [OperationArg]s to [StatementArg]s for the operations that work with entries
-    fn op_args_entries(&mut self, args: &mut [OperationArg]) -> Vec<StatementArg> {
+    fn op_args_entries(&mut self, public: bool, args: &mut [OperationArg]) -> Vec<StatementArg> {
         let mut st_args = Vec::new();
         for arg in args.iter_mut() {
             match arg {
@@ -259,10 +261,13 @@ impl MainPodBuilder {
                 OperationArg::Literal(v) => {
                     let k = format!("c{}", self.const_cnt);
                     self.const_cnt += 1;
-                    let value_of_st = self.op(Operation(
-                        NativeOperation::NewEntry,
-                        vec![OperationArg::Entry(k.clone(), v.clone())],
-                    ));
+                    let value_of_st = self.op(
+                        public,
+                        Operation(
+                            NativeOperation::NewEntry,
+                            vec![OperationArg::Entry(k.clone(), v.clone())],
+                        ),
+                    );
                     *arg = OperationArg::Key(AnchoredKey(Origin(PodClass::Main, SELF), k.clone()));
                     st_args.push(value_of_st.1[0].clone())
                 }
@@ -278,33 +283,53 @@ impl MainPodBuilder {
         st_args
     }
 
-    pub fn op(&mut self, mut op: Operation) -> &Statement {
+    pub fn pub_op(&mut self, op: Operation) -> Statement {
+        self.op(true, op)
+    }
+
+    pub fn op(&mut self, public: bool, mut op: Operation) -> Statement {
         use NativeOperation::*;
         let Operation(op_type, ref mut args) = op;
         // TODO: argument type checking
         let st = match op_type {
             None => Statement(NativeStatement::None, vec![]),
-            NewEntry => Statement(NativeStatement::ValueOf, self.op_args_entries(args)),
+            NewEntry => Statement(NativeStatement::ValueOf, self.op_args_entries(public, args)),
             CopyStatement => todo!(),
-            EqualFromEntries => Statement(NativeStatement::Equal, self.op_args_entries(args)),
-            NotEqualFromEntries => Statement(NativeStatement::NotEqual, self.op_args_entries(args)),
-            GtFromEntries => Statement(NativeStatement::Gt, self.op_args_entries(args)),
-            LtFromEntries => Statement(NativeStatement::Lt, self.op_args_entries(args)),
+            EqualFromEntries => {
+                Statement(NativeStatement::Equal, self.op_args_entries(public, args))
+            }
+            NotEqualFromEntries => Statement(
+                NativeStatement::NotEqual,
+                self.op_args_entries(public, args),
+            ),
+            GtFromEntries => Statement(NativeStatement::Gt, self.op_args_entries(public, args)),
+            LtFromEntries => Statement(NativeStatement::Lt, self.op_args_entries(public, args)),
             TransitiveEqualFromStatements => todo!(),
             GtToNotEqual => todo!(),
             LtToNotEqual => todo!(),
-            ContainsFromEntries => Statement(NativeStatement::Contains, self.op_args_entries(args)),
-            NotContainsFromEntries => {
-                Statement(NativeStatement::NotContains, self.op_args_entries(args))
-            }
+            ContainsFromEntries => Statement(
+                NativeStatement::Contains,
+                self.op_args_entries(public, args),
+            ),
+            NotContainsFromEntries => Statement(
+                NativeStatement::NotContains,
+                self.op_args_entries(public, args),
+            ),
             RenameContainedBy => todo!(),
             SumOf => todo!(),
             ProductOf => todo!(),
             MaxOf => todo!(),
         };
         self.operations.push(op);
+        if public {
+            self.public_statements.push(st.clone());
+        }
         self.statements.push(st);
-        &self.statements[self.statements.len() - 1]
+        self.statements[self.statements.len() - 1].clone()
+    }
+
+    pub fn reveal(&mut self, st: &Statement) {
+        self.public_statements.push(st.clone());
     }
 
     pub fn prove<P: PodProver>(&self, prover: &mut P) -> Result<MainPod> {
@@ -314,16 +339,17 @@ impl MainPodBuilder {
             // main_pods: &self.input_main_pods,
             statements: &self.statements,
             operations: &self.operations,
+            public_statements: &self.public_statements,
         };
-        let (statements, operations) = compiler.compile(inputs)?;
+        let (statements, operations, public_statements) = compiler.compile(inputs)?;
 
         // TODO: Add API to specify public/private statement
-        let statements = statements.into_iter().map(|s| (false, s)).collect_vec();
         let inputs = MainPodInputs {
             signed_pods: &self.input_signed_pods.iter().map(|p| &p.pod).collect_vec(),
             main_pods: &self.input_main_pods.iter().map(|p| &p.pod).collect_vec(),
             statements: &statements,
             operations: &operations,
+            public_statements: &public_statements,
         };
         let pod = prover.prove(&self.params, inputs)?;
         Ok(MainPod { pod })
@@ -350,6 +376,7 @@ struct MainPodCompilerInputs<'a> {
     // pub main_pods: &'a [Box<dyn middleware::MainPod>],
     pub statements: &'a [Statement],
     pub operations: &'a [Operation],
+    pub public_statements: &'a [Statement],
 }
 
 struct MainPodCompiler {
@@ -432,12 +459,17 @@ impl MainPodCompiler {
     pub fn compile<'a>(
         mut self,
         inputs: MainPodCompilerInputs<'a>,
-    ) -> Result<(Vec<middleware::Statement>, Vec<middleware::Operation>)> {
+    ) -> Result<(
+        Vec<middleware::Statement>, // input statements
+        Vec<middleware::Operation>,
+        Vec<middleware::Statement>, // public statements
+    )> {
         let MainPodCompilerInputs {
             // signed_pods: _,
             // main_pods: _,
             statements,
             operations,
+            public_statements,
         } = inputs;
         for (st, op) in statements.iter().zip_eq(operations.iter()) {
             self.compile_st_op(st, op);
@@ -445,7 +477,11 @@ impl MainPodCompiler {
                 panic!("too many statements");
             }
         }
-        Ok((self.statements, self.operations))
+        let public_statements = public_statements
+            .iter()
+            .map(|st| self.compile_st(st))
+            .collect_vec();
+        Ok((self.statements, self.operations, public_statements))
     }
 }
 
@@ -552,14 +588,14 @@ pub mod tests {
         let mut kyc = MainPodBuilder::new(&params);
         kyc.add_signed_pod(&gov_id);
         kyc.add_signed_pod(&pay_stub);
-        kyc.op(op!(not_contains, &sanction_list, (gov_id, "idNumber")));
-        kyc.op(op!(lt, (gov_id, "dateOfBirth"), now_minus_18y));
-        kyc.op(op!(
+        kyc.pub_op(op!(not_contains, &sanction_list, (gov_id, "idNumber")));
+        kyc.pub_op(op!(lt, (gov_id, "dateOfBirth"), now_minus_18y));
+        kyc.pub_op(op!(
             eq,
             (gov_id, "socialSecurityNumber"),
             (pay_stub, "socialSecurityNumber")
         ));
-        kyc.op(op!(eq, (pay_stub, "startDate"), now_minus_1y));
+        kyc.pub_op(op!(eq, (pay_stub, "startDate"), now_minus_1y));
 
         kyc
     }

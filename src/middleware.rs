@@ -350,13 +350,18 @@ impl MainPod for NoneMainPod {
     }
 }
 
+// TODO: Figure out a way to signal which signed_pods entries and which main_pods statements need
+// to be made public.  Idea: introduce an operation called reveal, which the backend translates to
+// CopyOf but moves copies that statement to a public slot?
 #[derive(Debug)]
 pub struct MainPodInputs<'a> {
     pub signed_pods: &'a [&'a Box<dyn SignedPod>],
     pub main_pods: &'a [&'a Box<dyn MainPod>],
-    /// Each entry is `(is_public, Statement)`
-    pub statements: &'a [(bool, Statement)],
+    pub statements: &'a [Statement],
     pub operations: &'a [Operation],
+    /// Statements that need to be made public (they can come from input pods or input
+    /// statements)
+    pub public_statements: &'a [Statement],
 }
 
 pub trait PodProver {
