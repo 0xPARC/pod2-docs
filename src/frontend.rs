@@ -315,8 +315,7 @@ impl MainPodBuilder {
             statements: &self.statements,
             operations: &self.operations,
         };
-        // TODO: Error handling
-        let (statements, operations) = compiler.compile(inputs).expect("TODO");
+        let (statements, operations) = compiler.compile(inputs)?;
 
         let inputs = MainPodInputs {
             signed_pods: &self
