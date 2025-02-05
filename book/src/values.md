@@ -41,6 +41,10 @@ The array, set and dictionary types are similar types. While all of them use [a 
 In the three types, the merkletree under the hood allows to prove inclusion & non-inclusion of the particular entry of the {dictionary/array/set} element.
 
 
+<br><br>
+
+---
+
 
 [^type]: <font color="red">TODO</font> In POD 1, there is the `cryptographic` type, which has the same type of the output of the hash function employed there. It is useful for representing arbitrary hashes. Do we want to expand our type list to include a similar type, which would correspond to the `HashOut` type in the case of Plonky2? This would not have a uniform representation in the frontend if we continue to be backend agnostic unless we fix the number of bits to e.g. 256, in which case we would actually need one more field element in the case of Plonky2.
 [^i64]: <font color="red">TODO</font> Replace this with `i64` once operational details have been worked out.
