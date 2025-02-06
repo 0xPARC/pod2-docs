@@ -1,0 +1,19 @@
+name: typos
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  typos:
+    if: github.event.pull_request.draft == false
+    name: Spell Check with Typos
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use typos with config file
+      uses: crate-ci/typos@master
+      with: 
+        config: .github/workflows/typos.toml
+

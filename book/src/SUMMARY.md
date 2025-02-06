@@ -3,7 +3,7 @@
 - [Introduction](./introduction.md)
 
 # Specification
-- [Data types](./datatypes.md)
+- [Backend types](./backendtypes.md)
 	- [MerkleTree](./merkletree.md)
 - [Deductions](./deductions.md)
 	- [Statements](./statements.md)

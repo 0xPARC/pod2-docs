@@ -1,6 +1,7 @@
 //! The middleware includes the type definitions and the traits used to connect the frontend and
 //! the backend.
 
+use anyhow::Result;
 use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
 use itertools::Itertools;
@@ -16,6 +17,7 @@ use strum_macros::FromRepr;
 
 pub const KEY_SIGNER: &str = "_signer";
 pub const KEY_TYPE: &str = "_type";
+pub const STATEMENT_ARG_F_LEN: usize = 8;
 
 /// F is the native field we use everywhere.  Currently it's Goldilocks from plonky2
 pub type F = GoldilocksField;
@@ -73,6 +75,12 @@ impl fmt::Display for Value {
 #[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq)]
 pub struct Hash(pub [F; 4]);
 
+impl ToFields for Hash {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        (self.0.to_vec(), 4)
+    }
+}
+
 impl Ord for Hash {
     fn cmp(&self, other: &Self) -> Ordering {
         Value(self.0).cmp(&Value(other.0))
@@ -115,6 +123,12 @@ impl FromHex for Hash {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct PodId(pub Hash);
+
+impl ToFields for PodId {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        self.0.to_fields()
+    }
+}
 
 pub const SELF: PodId = PodId(Hash([F::ONE, F::ZERO, F::ZERO, F::ZERO]));
 
@@ -170,6 +184,7 @@ pub struct Params {
     pub max_signed_pod_values: usize,
     pub max_public_statements: usize,
     pub max_statement_args: usize,
+    pub max_operation_args: usize,
 }
 
 impl Params {
@@ -187,6 +202,7 @@ impl Default for Params {
             max_signed_pod_values: 8,
             max_public_statements: 10,
             max_statement_args: 5,
+            max_operation_args: 5,
         }
     }
 }
@@ -219,8 +235,31 @@ pub trait SignedPod: fmt::Debug + DynClone {
 // impl Clone for Box<dyn SignedPod>
 dyn_clone::clone_trait_object!(SignedPod);
 
+/// This is a filler type that fulfills the SignedPod trait and always verifies.  It's empty.  This
+/// can be used to simulate padding in a circuit.
+#[derive(Debug, Clone)]
+pub struct NoneSignedPod {}
+
+impl SignedPod for NoneSignedPod {
+    fn verify(&self) -> bool {
+        true
+    }
+    fn id(&self) -> PodId {
+        PodId(NULL)
+    }
+    fn kvs(&self) -> HashMap<Hash, Value> {
+        HashMap::new()
+    }
+    fn pub_statements(&self) -> Vec<Statement> {
+        Vec::new()
+    }
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 pub trait PodSigner {
-    fn sign(&mut self, params: &Params, kvs: &HashMap<Hash, Value>) -> Box<dyn SignedPod>;
+    fn sign(&mut self, params: &Params, kvs: &HashMap<Hash, Value>) -> Result<Box<dyn SignedPod>>;
 }
 
 #[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
@@ -236,6 +275,12 @@ pub enum NativeStatement {
     SumOf = 8,
     ProductOf = 9,
     MaxOf = 10,
+}
+
+impl ToFields for NativeStatement {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        (vec![F::from_canonical_u64(self as u64)], 1)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -254,12 +299,61 @@ impl StatementArg {
     }
 }
 
+impl ToFields for StatementArg {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        // NOTE: current version returns always the same amount of field elements in the returned
+        // vector, which means that the `None` case is padded with 8 zeroes, and the `Literal` case
+        // is padded with 4 zeroes. Since the returned vector will mostly be hashed (and reproduced
+        // in-circuit), we might be interested into reducing the length of it. If that's the case,
+        // we can check if it makes sense to make it dependant on the concrete StatementArg; that
+        // is, when dealing with a `None` it would be a single field element (zero value), and when
+        // dealing with `Literal` it would be of length 4.
+        let f = match self {
+            StatementArg::None => vec![F::ZERO; STATEMENT_ARG_F_LEN],
+            StatementArg::Literal(v) => {
+                let value_f = v.0.to_vec();
+                [
+                    value_f.clone(),
+                    vec![F::ZERO; STATEMENT_ARG_F_LEN - value_f.len()],
+                ]
+                .concat()
+            }
+            StatementArg::Key(ak) => {
+                let (podid_f, _) = ak.0.to_fields();
+                let (hash_f, _) = ak.1.to_fields();
+                [podid_f, hash_f].concat()
+            }
+        };
+        assert_eq!(f.len(), STATEMENT_ARG_F_LEN); // sanity check
+        (f, STATEMENT_ARG_F_LEN)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
 
 impl Statement {
     pub fn is_none(&self) -> bool {
         matches!(self.0, NativeStatement::None)
+    }
+}
+
+impl ToFields for Statement {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        let (native_statement_f, native_statement_f_len) = self.0.to_fields();
+        let (vec_statementarg_f, vec_statementarg_f_len) = self
+            .1
+            .into_iter()
+            .map(|statement_arg| statement_arg.to_fields())
+            .fold((Vec::new(), 0), |mut acc, (f, l)| {
+                acc.0.extend(f);
+                acc.1 += l;
+                acc
+            });
+        (
+            [native_statement_f, vec_statementarg_f].concat(),
+            native_statement_f_len + vec_statementarg_f_len,
+        )
     }
 }
 
@@ -304,14 +398,43 @@ pub trait MainPod: fmt::Debug + DynClone {
 // impl Clone for Box<dyn SignedPod>
 dyn_clone::clone_trait_object!(MainPod);
 
+/// This is a filler type that fulfills the MainPod trait and always verifies.  It's empty.  This
+/// can be used to simulate padding in a circuit.
+#[derive(Debug, Clone)]
+pub struct NoneMainPod {}
+
+impl MainPod for NoneMainPod {
+    fn verify(&self) -> bool {
+        true
+    }
+    fn id(&self) -> PodId {
+        PodId(NULL)
+    }
+    fn pub_statements(&self) -> Vec<Statement> {
+        Vec::new()
+    }
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 #[derive(Debug)]
 pub struct MainPodInputs<'a> {
-    pub signed_pods: &'a [&'a dyn SignedPod],
-    pub main_pods: &'a [&'a dyn MainPod],
+    pub signed_pods: &'a [&'a Box<dyn SignedPod>],
+    pub main_pods: &'a [&'a Box<dyn MainPod>],
     pub statements: &'a [Statement],
     pub operations: &'a [Operation],
+    /// Statements that need to be made public (they can come from input pods or input
+    /// statements)
+    pub public_statements: &'a [Statement],
 }
 
 pub trait PodProver {
-    fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Box<dyn MainPod>;
+    fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Result<Box<dyn MainPod>>;
+}
+
+pub trait ToFields {
+    /// returns Vec<F> representation of the type, and a usize indicating how many field elements
+    /// does the vector contain
+    fn to_fields(self) -> (Vec<F>, usize);
 }
