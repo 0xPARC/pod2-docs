@@ -268,14 +268,10 @@ impl MockMainPod {
 }
 
 pub fn hash_statements(statements: &[middleware::Statement]) -> Result<middleware::Hash> {
-    let (field_elems, _) = statements
+    let field_elems = statements
         .into_iter()
-        .map(|statement| statement.clone().to_fields())
-        .fold((Vec::new(), 0), |mut acc, (f, l)| {
-            acc.0.extend(f);
-            acc.1 += l;
-            acc
-        });
+        .flat_map(|statement| statement.clone().to_fields().0)
+        .collect::<Vec<_>>();
     Ok(Hash(PoseidonHash::hash_no_pad(&field_elems).elements))
 }
 
