@@ -3,7 +3,11 @@
 - [Introduction](./introduction.md)
 
 # Specification
-- [Backend types](./backendtypes.md)
+- The frontend structure of a POD
+	- [Frontend POD value types](./values.md)
+	- [Anchored keys](./anchoredkeys.md)
+- The backend structure of a POD
+	- [Backend types](./backendtypes.md)
 	- [MerkleTree](./merkletree.md)
 - [Deductions](./deductions.md)
 	- [Statements](./statements.md)
@@ -12,5 +16,4 @@
 	- [SignedPOD](./signedpod.md)
 	- [MainPOD](./mainpod.md)
 	- [MockPOD](./mockpod.md)
-- [POD value types](./values.md)
 - [Examples](./examples.md)

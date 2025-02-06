@@ -1,45 +1,127 @@
 # Statements
-The claims asserted by a POD are referred to as its *statements*. These statements introduce values and express relations between them, where the values may or may not be part of the same POD. The mechanism for referring to values in arbitrary PODs is furnished by *anchored keys*.
 
-## Anchored keys
-Rather than dealing with just keys, we introduce the notion of an *anchored key*, which is a pair consisting of an origin specifier and a key, i.e.
+A _statement_ is any sort of claim about the values of entries: for example, that two values are equal, or that one entry is contained in another.
+
+Statements come in two types: _built-in_ and _custom_.  There is a short list of built-in statements (see below). [^builtin]
+In addition, users can freely define custom statements.
+
+From the user (front-end) perspective, a statement represents a claim about the values of some number of entries -- the statement can only be proved if the claim is true.
+
+From the circuit (back-end) perspective, a statement can be proved either:
+- by direct in-circuit verification, or
+- by an operation (aka deduction rule).
+
+## Built-in statements
+
+The POD system has several builtin statements. These statements are associated to a reserved set of statement IDs.
 
 ```
-type AnchoredKey = (Origin, Key)
-type Key = String
+ValueOf(AnchoredKey, ScalarOrVec),
+Equal(AnchoredKey, AnchoredKey),
+NotEqual(AnchoredKey, AnchoredKey),
+IsGreater(AnchoredKey, AnchoredKey),
+IsLess(AnchoredKey, AnchoredKey),
+IsGreaterOrEqual(AnchoredKey, AnchoredKey),
+IsLessOrEqual(AnchoredKey, AnchoredKey),
+SumOf(AnchoredKey, AnchoredKey, AnchoredKey),
+ProductOf(AnchoredKey, AnchoredKey, AnchoredKey),
+MaxOf(AnchoredKey, AnchoredKey, AnchoredKey),
+Branches(AnchoredKey, AnchoredKey, AnchoredKey),
+Leaf(AnchoredKey, AnchoredKey, AnchoredKey),
+GoesLeft(AnchoredKey, AnchoredKey),
+GoesRight(AnchoredKey, AnchoredKey),
+Contains(AnchoredKey, AnchoredKey)
+DoesNotContain(AnchoredKey, AnchoredKey)
 ```
 
-An *origin* is a triple consisting of a numeric identifier called the *origin ID*, a string called the *origin name* (omitted in the backend) and another numeric identifier called the *gadget ID*, which identifies the means by which the value corresponding to a given key is produced.
 
-The origin ID is defined to be 0 for 'no origin' and 1 for 'self origin', otherwise it is the content ID[^content-id] of the POD to which it refers. The origin name is not cryptographically significant and is merely a convenience for the frontend.
+In the future, we may also reserve statement IDs for "precompiles" such as:
+```
+poseidon_hash_of(A.hash, B.preimage) // perhaps a hash_of predicate can be parametrized by an enum representing the hash scheme; rather than having a bunch of specific things like SHA256_hash_of and poseidon_hash_of etc.
+```
 
-The gadget ID takes on the values in the following table:
+```
+ecdsa_priv_to_pub_of(A.pubkey, B.privkey)
+```
 
-| Gadget ID | Meaning                                                                                   |
-|-----------|-------------------------------------------------------------------------------------------|
-| 0         | no gadget                                                                                 |
-| 1         | `SignedPOD` gadget: The key-value pair was produced in the construction of a `SignedPOD`. |
-| 2         | `MainPOD` gadget: The key-value pair was produced in the construction of a `MainPOD`.     |
+### Built-in statements for entries of any type
 
-For example, a gadget ID of 1 implies that the key-value pair in question was produced in the process of constructing a `SignedPOD`.
+A ```ValueOf``` statement asserts that an entry has a certain value.
+```
+ValueOf(A.name, "Arthur") 
+```
 
-## Statement types
-A statement is a code (or, in the frontend, string identifier) followed by 0 or more arguments. These arguments may consist of up to three anchored keys and up to one POD value.
+An ```IsEqual``` statement asserts that two entries have the same value.  (Technical note: The circuit only proves equality of field elements; no type checking is performed.  For strings or Merkle roots, collision-resistance of the hash gives a cryptographic guarantee of equality.)
+```
+IsEqual(A.name, B.name)
+```
 
-The following table summarises the natively-supported statements, where we write `value_of(ak)` for 'the value anchored key `ak` maps to', which is of type `PODValue`, and `key_of(ak)` for the key part of `ak`:
+An ```IsUnequal``` statement asserts that two entries have different values.
+```
+IsUnequal   (for arbitary types)
+```
 
-| Code | Identifier  | Args                | Meaning                                                           |
-|------|-------------|---------------------|-------------------------------------------------------------------|
-| 0    | `None`      |                     | no statement (useful for padding)                                 |
-| 1    | `ValueOf`   | `ak`, `value`       | `value_of(ak) = value`                                            |
-| 2    | `Eq`        | `ak1`, `ak2`        | `value_of(ak1) = value_of(ak2)`                                   |
-| 3    | `NEq`       | `ak1`, `ak2`        | `value_of(ak1) != value_of(ak2)`                                  |
-| 4    | `Gt`        | `ak1`, `ak2`        | `value_of(ak1) > value_of(ak2)`                                   |
-| 5    | `LEq`       | `ak1`, `ak2`        | `value_of(ak1) <= value_of(ak2)`                                  |
-| 6    | `Contains`  | `ak1`, `ak2`        | `(key_of(ak2), value_of(ak2)) ∈ value_of(ak1)` (Merkle inclusion) |
-| 7    | `Sintains`  | `ak1`, `ak2`        | `(key_of(ak2), value_of(ak2)) ∉ value_of(ak1)` (Merkle exclusion) |
-| 8    | `SumOf`     | `ak1`, `ak2`, `ak3` | `value_of(ak1) = value_of(ak2) + value_of(ak3)`                   |
-| 9    | `ProductOf` | `ak1`, `ak2`, `ak3` | `value_of(ak1) = value_of(ak2) * value_of(ak3)`                   |
-| 10   | `MaxOf`     | `ak1`, `ak2`, `ak3` | `value_of(ak1) = max(value_of(ak2), value_of(ak3))`               |
+##### Built-in Statements for Numerical Types
+An ```IsGreater(x, y)``` statement asserts that ```x``` is an entry of type ```Integer```, ```y``` is an entry or constant of type ```Integer```, and ```x > y```.
+```
+is_greater    (for numerical types only)
+is_greater(A.price, 100)
+is_greater(A.price, B.balance)
+```
 
-[^content-id]: <font color="red">TODO</font> Refer to this when it is documented.
+The statements ```IsLess```, ```IsGreaterOrEqual```, ```IsLessOrEqual``` are defined analogously.
+
+```SumOf(x, y, z)``` asserts that ```x```, ```y```, ```z``` are entries of type ```Integer```, and [^fillsum]
+
+```ProductOf``` and ```MaxOf``` are defined analogously.
+
+The two items below may be added in the future:
+```
+poseidon_hash_of(A.hash, B.preimage) // perhaps a hash_of predicate can be parametrized by an enum representing the hash scheme; rather than having a bunch of specific things like SHA256_hash_of and poseidon_hash_of etc.
+```
+
+```
+ecdsa_priv_to_pub_of(A.pubkey, B.privkey)
+```
+
+##### Primitive Built-in Statements for Merkle Roots
+
+Every Merkle root either:
+- is a special type of Merkle tree called a "leaf", which just has a single element, or
+- has two branches, left and right -- each of which is itself a Merkle tree.  Such a tree is called a "non-leaf" Merkle tree.
+
+There are six built-in statements involving Merkle roots:
+```
+Branches(node, left, right, depth)
+```
+means that ```node``` is a non-leaf Merkle node at depth ```depth```, and ```left``` and ```right``` are its branches.
+```
+Leaf(node, item)
+```
+means that ```node``` is a leaf Merkle node, whose single item is ```item```.
+
+```
+GoesLeft(node, item, depth)
+```
+means that ```node``` is a non-leaf Merkle node at depth ```depth```, and if ```item``` is contained under ```node```, it must be in the left branch.
+
+```
+GoesRight(node, item, depth)
+```
+means that ```tree``` is a non-leaf Merkle node at depth ```depth```, and if ```item``` is contained under ```node```, it must be in the right branch.
+
+
+```
+Contains(tree, item)
+```
+means that ```item``` is contained in the Merkle tree ```tree```.
+
+```
+DoesNotContain(tree, item)
+```
+means that ```item``` is not contained in the Merkle tree ```tree```.
+
+
+[^builtin]: <font color="red">TODO</font> List of built-in statements is not yet complete.
+
+[^fillsum]: <font color="red">TODO</font> Does sum mean x+y = z or x = y+z?

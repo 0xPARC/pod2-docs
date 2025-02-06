@@ -1,10 +1,14 @@
 # POD value types
-From the frontend perspective, POD values may be one of three[^type] types:
+From the frontend perspective, POD values may be one of the following[^type] types: two atomic types
 - `Integer`
 - `String`
-- `Dictionary`, `array`, `set`
 
-From the backend perspective, however, these types will all be encoded as a fixed number of field elements, the number being chosen so as to accommodate the `Integer` type as well as hashes to represent the `String` and `MerkleTree` types with the appropriate level of security.
+and three compound types
+- `Dictionary`
+- `Array`
+- `Set`.
+
+From the backend perspective, however, these types will all be encoded as a fixed number of field elements, the number being chosen so as to accommodate the `Integer` type as well as hashes to represent the `String` and compound types with the appropriate level of security.
 
 In the case of the Plonky2 backend with 100 bits of security, all of these types are represented as 4 field elements, the output of the Poseidon hash function used there being
 
