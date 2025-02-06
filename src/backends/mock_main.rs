@@ -284,13 +284,12 @@ pub fn hash_statements(statements: &[middleware::Statement]) -> Result<middlewar
 
 impl MainPod for MockMainPod {
     fn verify(&self) -> bool {
-        // TODO
-        // - define input_statements as `statements.[self.offset_input_statements()..]`
+        // get the input_statements from the self.statements
         let input_statements = &self.statements[self.offset_input_statements()..];
-        // - Calculate the id from a subset of the statements.  Check it's equal to self.id
+        // get the id out of the public statements, and ensure it is equal to self.id
         let ids_match = self.id == PodId(hash_statements(&self.public_statements).unwrap());
-        // - Find a ValueOf statement from the public statements with key=KEY_TYPE and check that
-        // the value is PodType::MockMainPod
+        // find a ValueOf statement from the public statements with key=KEY_TYPE and check that the
+        // value is PodType::MockMainPod
         let has_type_statement = self
             .public_statements
             .iter()
@@ -304,7 +303,7 @@ impl MainPod for MockMainPod {
                     }
             })
             .is_some();
-        // - Check that all `input_statements` of type `ValueOf` with origin=SELF have unique keys
+        // check that all `input_statements` of type `ValueOf` with origin=SELF have unique keys
         // (no duplicates)
         let value_ofs_unique = {
             let key_id_pairs = input_statements
@@ -332,7 +331,8 @@ impl MainPod for MockMainPod {
                 .collect::<Vec<_>>();
             !(0..key_id_pairs.len() - 1).any(|i| key_id_pairs[i + 1..].contains(&key_id_pairs[i]))
         };
-        // - Verify that all `input_statements` are correctly generated
+        // TODO
+        // verify that all `input_statements` are correctly generated
         // by `self.operations` (where each operation can only access previous statements)
         ids_match && has_type_statement && value_ofs_unique
     }
@@ -340,11 +340,26 @@ impl MainPod for MockMainPod {
         self.id
     }
     fn pub_statements(&self) -> Vec<Statement> {
-        // TODO: All arguments that use origin=SELF need to be replaced by origin=self.id()
+        // return the public statements, where when origin=SELF is replaced by origin=self.id()
         self.statements
             .iter()
             .skip(self.offset_public_statements())
             .cloned()
+            .map(|statement| {
+                Statement(
+                    statement.0.clone(),
+                    statement
+                        .1
+                        .iter()
+                        .map(|sa| match &sa {
+                            StatementArg::Key(AnchoredKey(pod_id, h)) if *pod_id == SELF => {
+                                StatementArg::Key(AnchoredKey(self.id(), *h))
+                            }
+                            _ => sa.clone(),
+                        })
+                        .collect(),
+                )
+            })
             .collect()
     }
 
@@ -489,6 +504,6 @@ pub mod tests {
 
         assert_eq!(pod.verify(), true); // TODO
                                         // println!("id: {}", pod.id());
-                                        // println!("kvs: {:?}", pod.pub_statements());
+                                        // println!("pub_statements: {:?}", pod.pub_statements());
     }
 }
