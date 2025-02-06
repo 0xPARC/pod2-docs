@@ -58,7 +58,7 @@ IsEqual(A.name, B.name)
 
 An ```IsUnequal``` statement asserts that two entries have different values.
 ```
-IsUnequal   (for arbitary types)
+IsUnequal   (for arbitrary types)
 ```
 
 ##### Built-in Statements for Numerical Types
