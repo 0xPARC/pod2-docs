@@ -1,4 +1,4 @@
 /target
 Cargo.lock
-*/.DS_Store
-*/aardnotes
+.DS_Store
+aardnotes.md
