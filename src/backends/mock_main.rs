@@ -7,6 +7,7 @@ use itertools::Itertools;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::Hasher;
 use std::any::Any;
+use std::fmt;
 use std::io::{self, Write};
 
 pub struct MockProver {}
@@ -32,6 +33,24 @@ impl OperationArg {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} ", self.0)?;
+        for (i, arg) in self.1.iter().enumerate() {
+            if !(!f.alternate() && arg.is_none()) {
+                if i != 0 {
+                    write!(f, " ")?;
+                }
+                match arg {
+                    OperationArg::None => write!(f, "none")?,
+                    OperationArg::Index(i) => write!(f, "{:02}", i)?,
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MockMainPod {
     params: Params,
@@ -44,6 +63,73 @@ pub struct MockMainPod {
     operations: Vec<Operation>,
     // All statements (inherited + new)
     statements: Vec<Statement>,
+}
+
+impl fmt::Display for MockMainPod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "MockMainPod ({}):", self.id)?;
+        // TODO print input signed pods id and type
+        // TODO print input main pods id and type
+        let offset_input_main_pods = self.offset_input_main_pods();
+        let offset_input_statements = self.offset_input_statements();
+        let offset_public_statements = self.offset_public_statements();
+        for (i, st) in self.statements.iter().enumerate() {
+            if (i < self.offset_input_main_pods()) && (i % self.params.max_signed_pod_values == 0) {
+                writeln!(
+                    f,
+                    "  from input SignedPod {}:",
+                    i / self.params.max_signed_pod_values
+                )?;
+            }
+            if (i >= offset_input_main_pods)
+                && (i < offset_input_statements)
+                && (i % self.params.max_public_statements == 0)
+            {
+                writeln!(
+                    f,
+                    "  from input MainPod {}:",
+                    (i - offset_input_main_pods) / self.params.max_signed_pod_values
+                )?;
+            }
+            if i == offset_input_statements {
+                writeln!(f, "  private statements:")?;
+            }
+            if i == offset_public_statements {
+                writeln!(f, "  public statements:")?;
+            }
+
+            let op = (i >= offset_input_statements)
+                .then(|| &self.operations[i - offset_input_statements]);
+            fmt_statement_index(f, &st, op, i)?;
+        }
+        Ok(())
+    }
+}
+
+fn fmt_statement_index(
+    f: &mut fmt::Formatter,
+    st: &Statement,
+    op: Option<&Operation>,
+    index: usize,
+) -> fmt::Result {
+    if !(!f.alternate() && st.is_none()) {
+        write!(f, "    {:03}. ", index)?;
+        if f.alternate() {
+            write!(f, "{:#}", &st)?;
+        } else {
+            write!(f, "{}", &st)?;
+        }
+        if let Some(op) = op {
+            write!(f, " <- ")?;
+            if f.alternate() {
+                write!(f, "{:#}", op)?;
+            } else {
+                write!(f, "{}", op)?;
+            }
+        }
+        write!(f, "\n")?;
+    }
+    Ok(())
 }
 
 fn fill_pad<T: Clone>(v: &mut Vec<T>, pad_value: T, len: usize) {
@@ -305,110 +391,6 @@ impl MainPod for MockMainPod {
     }
 }
 
-/// Useful for debugging
-pub struct Printer {
-    pub skip_none: bool,
-}
-
-impl Printer {
-    fn fmt_arg(&self, w: &mut dyn Write, arg: &StatementArg) -> io::Result<()> {
-        match arg {
-            StatementArg::None => write!(w, "none"),
-            StatementArg::Literal(v) => write!(w, "{}", v),
-            StatementArg::Key(r) => write!(w, "{}.{}", r.0, r.1),
-        }
-    }
-
-    fn fmt_statement(&self, w: &mut dyn Write, st: &Statement) -> io::Result<()> {
-        write!(w, "{:?} ", st.0)?;
-        for (i, arg) in st.1.iter().enumerate() {
-            if !(self.skip_none && arg.is_none()) {
-                if i != 0 {
-                    write!(w, " ")?;
-                }
-                self.fmt_arg(w, arg)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn fmt_operation(&self, w: &mut dyn Write, op: &Operation) -> io::Result<()> {
-        write!(w, "{:?} ", op.0)?;
-        for (i, arg) in op.1.iter().enumerate() {
-            if !(self.skip_none && arg.is_none()) {
-                if i != 0 {
-                    write!(w, " ")?;
-                }
-                match arg {
-                    OperationArg::None => write!(w, "none")?,
-                    OperationArg::Index(i) => write!(w, "{:02}", i)?,
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn fmt_statement_index(
-        &self,
-        w: &mut dyn Write,
-        st: &Statement,
-        op: Option<&Operation>,
-        index: usize,
-    ) -> io::Result<()> {
-        if !(self.skip_none && st.is_none()) {
-            write!(w, "    {:03}. ", index)?;
-            self.fmt_statement(w, &st)?;
-            if let Some(op) = op {
-                write!(w, " <- ")?;
-                self.fmt_operation(w, op)?;
-            }
-            write!(w, "\n")?;
-        }
-        Ok(())
-    }
-
-    pub fn fmt_mock_main_pod(&self, w: &mut dyn Write, pod: &MockMainPod) -> io::Result<()> {
-        writeln!(w, "MockMainPod ({}):", pod.id)?;
-        // TODO print input signed pods id and type
-        // TODO print input main pods id and type
-        let offset_input_main_pods = pod.offset_input_main_pods();
-        let offset_input_statements = pod.offset_input_statements();
-        let offset_public_statements = pod.offset_public_statements();
-        for (i, st) in pod.statements.iter().enumerate() {
-            if (i < pod.offset_input_main_pods()) && (i % pod.params.max_signed_pod_values == 0) {
-                writeln!(
-                    w,
-                    "  from input SignedPod {}:",
-                    i / pod.params.max_signed_pod_values
-                )?;
-            }
-            if (i >= offset_input_main_pods)
-                && (i < offset_input_statements)
-                && (i % pod.params.max_public_statements == 0)
-            {
-                writeln!(
-                    w,
-                    "  from input MainPod {}:",
-                    (i - offset_input_main_pods) / pod.params.max_signed_pod_values
-                )?;
-            }
-            if i == offset_input_statements {
-                writeln!(w, "  private statements:")?;
-            }
-            if i == offset_public_statements {
-                writeln!(w, "  public statements:")?;
-            }
-
-            let op = (i >= offset_input_statements)
-                .then(|| &pod.operations[i - offset_input_statements]);
-            if !(self.skip_none && st.is_none()) {
-                self.fmt_statement_index(w, &st, op, i)?;
-            }
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -435,9 +417,7 @@ pub mod tests {
         let kyc_pod = kyc_builder.prove(&mut prover).unwrap();
         let pod = kyc_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
 
-        let printer = Printer { skip_none: false };
-        let mut w = io::stdout();
-        printer.fmt_mock_main_pod(&mut w, &pod).unwrap();
+        println!("{:#}", pod);
 
         // assert_eq!(pod.verify(), true); // TODO
         // println!("id: {}", pod.id());

@@ -293,6 +293,16 @@ pub enum StatementArg {
     Key(AnchoredKey),
 }
 
+impl fmt::Display for StatementArg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            StatementArg::None => write!(f, "none"),
+            StatementArg::Literal(v) => write!(f, "{}", v),
+            StatementArg::Key(r) => write!(f, "{}.{}", r.0, r.1),
+        }
+    }
+}
+
 impl StatementArg {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
@@ -331,6 +341,21 @@ impl ToFields for StatementArg {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
+
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} ", self.0)?;
+        for (i, arg) in self.1.iter().enumerate() {
+            if !(!f.alternate() && arg.is_none()) {
+                if i != 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", arg)?;
+            }
+        }
+        Ok(())
+    }
+}
 
 impl Statement {
     pub fn is_none(&self) -> bool {
