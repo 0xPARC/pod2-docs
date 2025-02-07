@@ -1,7 +1,7 @@
 //! The middleware includes the type definitions and the traits used to connect the frontend and
 //! the backend.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
 use itertools::Itertools;
@@ -54,6 +54,22 @@ impl From<i64> for Value {
         let lo = F::from_canonical_u64((v as u64) & 0xffffffff);
         let hi = F::from_canonical_u64((v as u64) >> 32);
         Value([lo, hi, F::ZERO, F::ZERO])
+    }
+}
+
+impl TryInto<i64> for Value {
+    type Error = Error;
+    fn try_into(self) -> std::result::Result<i64, Self::Error> {
+        let value = self.0;
+        if &value[2..] != &[F::ZERO, F::ZERO]
+            || value[..2]
+                .iter()
+                .all(|x| x.to_canonical_u64() > u32::MAX as u64)
+        {
+            Err(anyhow!("Value not an element of the i64 embedding."))
+        } else {
+            Ok((value[0].to_canonical_u64() + value[1].to_canonical_u64() << 32) as i64)
+        }
     }
 }
 
@@ -504,6 +520,29 @@ impl Operation {
                 let s = self.args()[0].statement()?;
                 let arg_is_lt = s.code() == NativeStatement::Lt;
                 Ok(arg_is_lt && output_statement.code() == NativeStatement::NotEqual && output_statement.args() == s.args())
+            },
+            RenameContainedBy => {
+                let s1 = self.args()[0].statement()?;
+                let s2 = self.args()[1].statement()?;
+                let key1 = s1.args()[0].key()?;
+                let key2 = s1.args()[1].key()?;
+                let key3 = s2.args()[0].key()?;
+                let key4 = s2.args()[1].key()?;
+                let args_satisfy_rename = s1.code() == NativeStatement::Contains && s2.code() == NativeStatement::Equal && key1 == key3;
+                Ok(args_satisfy_rename && output_statement.code() == NativeStatement::Contains && output_statement.args()[0].key()? == key4 && output_statement.args()[1].key()? == key2)
+            },
+            SumOf => {
+                let s1 = self.args()[0].statement()?;
+                let s1_key = s1.args()[0].key()?;
+                let s1_value: i64 = s1.args()[1].literal()?.try_into()?;
+                let s2 = self.args()[1].statement()?;
+                let s2_key = s2.args()[0].key()?;
+                let s2_value:i64 = s2.args()[1].literal()?.try_into()?;
+                let s3 = self.args()[2].statement()?;
+                let s3_key = s3.args()[0].key()?;
+                let s3_value: i64 = s3.args()[1].literal()?.try_into()?;
+                let sum_holds = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s3.code() == NativeStatement::ValueOf && s1_value == s2_value + s3_value;
+                Ok(sum_holds && output_statement.code() == NativeStatement::SumOf && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key && output_statement.args()[2].key()? == s3_key)
             },
             // TODO: Remaining ops.
             _ => Ok(true)
