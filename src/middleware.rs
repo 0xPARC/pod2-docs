@@ -284,6 +284,7 @@ impl ToFields for NativeStatement {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// AnchoredKey is a tuple containing (OriginId: PodId, key: Hash)
 pub struct AnchoredKey(pub PodId, pub Hash);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
