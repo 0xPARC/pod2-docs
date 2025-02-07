@@ -33,6 +33,22 @@ impl OperationArg {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
+impl Operation {
+    pub fn deref(&self, statements: &[Statement]) -> crate::middleware::Operation {
+        let deref_args = self
+            .1
+            .iter()
+            .map(|arg| match arg {
+                OperationArg::None => middleware::OperationArg::None,
+                OperationArg::Index(i) => {
+                    middleware::OperationArg::Statement(statements[*i].clone())
+                }
+            })
+            .collect();
+        middleware::Operation(self.0, deref_args)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MockMainPod {
     params: Params,
@@ -284,8 +300,9 @@ pub fn hash_statements(statements: &[middleware::Statement]) -> Result<middlewar
 
 impl MainPod for MockMainPod {
     fn verify(&self) -> bool {
+        let input_statement_offset = self.offset_input_statements();
         // get the input_statements from the self.statements
-        let input_statements = &self.statements[self.offset_input_statements()..];
+        let input_statements = &self.statements[input_statement_offset..];
         // get the id out of the public statements, and ensure it is equal to self.id
         let ids_match = self.id == PodId(hash_statements(&self.public_statements).unwrap());
         // find a ValueOf statement from the public statements with key=KEY_TYPE and check that the
@@ -331,10 +348,19 @@ impl MainPod for MockMainPod {
                 .collect::<Vec<_>>();
             !(0..key_id_pairs.len() - 1).any(|i| key_id_pairs[i + 1..].contains(&key_id_pairs[i]))
         };
-        // TODO
         // verify that all `input_statements` are correctly generated
         // by `self.operations` (where each operation can only access previous statements)
-        ids_match && has_type_statement && value_ofs_unique
+        let statement_check = input_statements
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                self.operations[i]
+                    .deref(&self.statements[..input_statement_offset + i])
+                    .check(s.clone())
+            })
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        ids_match && has_type_statement && value_ofs_unique & statement_check.into_iter().all(|b| b)
     }
     fn id(&self) -> PodId {
         self.id

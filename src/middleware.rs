@@ -1,7 +1,7 @@
 //! The middleware includes the type definitions and the traits used to connect the frontend and
 //! the backend.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
 use itertools::Itertools;
@@ -12,7 +12,7 @@ use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
 use std::any::Any;
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;
-use std::fmt;
+use std::{array, fmt};
 use strum_macros::FromRepr;
 
 pub const KEY_SIGNER: &str = "_signer";
@@ -287,6 +287,15 @@ impl ToFields for NativeStatement {
 /// AnchoredKey is a tuple containing (OriginId: PodId, key: Hash)
 pub struct AnchoredKey(pub PodId, pub Hash);
 
+impl AnchoredKey {
+    pub fn origin(&self) -> PodId {
+        self.0
+    }
+    pub fn key(&self) -> Hash {
+        self.1
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatementArg {
     None,
@@ -297,6 +306,18 @@ pub enum StatementArg {
 impl StatementArg {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
+    }
+    pub fn literal(&self) -> Result<Value> {
+        match self {
+            Self::Literal(value) => Ok(*value),
+            _ => Err(anyhow!("Statement argument {:?} is not a literal.", self)),
+        }
+    }
+    pub fn key(&self) -> Result<AnchoredKey> {
+        match self {
+            Self::Key(ak) => Ok(ak.clone()),
+            _ => Err(anyhow!("Statement argument {:?} is not a key.", self)),
+        }
     }
 }
 
@@ -334,6 +355,12 @@ impl ToFields for StatementArg {
 pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
 
 impl Statement {
+    pub fn code(&self) -> NativeStatement {
+        self.0
+    }
+    pub fn args(&self) -> &[StatementArg] {
+        &self.1
+    }
     pub fn is_none(&self) -> bool {
         matches!(self.0, NativeStatement::None)
     }
@@ -385,8 +412,104 @@ pub enum OperationArg {
     Key(AnchoredKey),
 }
 
+impl OperationArg {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+    pub fn statement(&self) -> Result<Statement> {
+        match self {
+            Self::Statement(statement) => Ok(statement.clone()),
+            _ => Err(anyhow!("Operation argument {:?} is not a statement.", self)),
+        }
+    }
+    pub fn key(&self) -> Result<AnchoredKey> {
+        match self {
+            Self::Key(ak) => Ok(ak.clone()),
+            _ => Err(anyhow!("Operation argument {:?} is not a key.", self)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
+
+impl Operation {
+    pub fn code(&self) -> NativeOperation {
+        self.0
+    }
+    pub fn args(&self) -> &[OperationArg] {
+        &self.1
+    }
+    // TODO: Argument checking.
+    /// Checks the given operation against a statement.
+    pub fn check(&self, output_statement: Statement) -> Result<bool> {
+        use NativeOperation::*;
+        match self.0 {
+            // Nothing to check.
+            None => Ok(output_statement.code() == NativeStatement::None),
+            // Check that the resulting statement is of type `ValueOf`
+            // and its origin is `SELF`.
+            NewEntry =>
+                Ok(output_statement.code() == NativeStatement::ValueOf && output_statement.args()[0].key()?.origin() == SELF)
+            ,
+            // Check that the operation acts on a statement *and* the
+            // output is equal to this statement.
+            CopyStatement => Ok(output_statement == self.args()[0].statement()?)
+            ,
+            EqualFromEntries => {
+                let s1 = self.args()[0].statement()?;
+                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
+                let s2 = self.args()[1].statement()?;
+                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
+                let statements_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value == s2_value;
+                Ok(statements_equal && output_statement.code() == NativeStatement::Equal && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}
+            ,
+            NotEqualFromEntries => {
+                let s1 = self.args()[0].statement()?;
+                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
+                let s2 = self.args()[1].statement()?;
+                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
+                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value != s2_value;
+                Ok(statements_not_equal && output_statement.code() == NativeStatement::NotEqual && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}                ,
+            GtFromEntries => {
+                let s1 = self.args()[0].statement()?;
+                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
+                let s2 = self.args()[1].statement()?;
+                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
+                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value > s2_value;
+                Ok(statements_not_equal && output_statement.code() == NativeStatement::Gt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
+            LtFromEntries => {
+                let s1 = self.args()[0].statement()?;
+                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
+                let s2 = self.args()[1].statement()?;
+                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
+                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value < s2_value;
+                Ok(statements_not_equal && output_statement.code() == NativeStatement::Lt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
+            TransitiveEqualFromStatements => {
+                let s1 = self.args()[0].statement()?;
+                let s2 = self.args()[1].statement()?;
+                let key1 = s1.args()[0].key()?;
+                let key2 = s1.args()[1].key()?;
+                let key3 = s2.args()[0].key()?;
+                let key4 = s2.args()[1].key()?;
+                let statements_satisfy_transitivity = s1.code() == NativeStatement::Equal && s2.code() == NativeStatement::Equal && key2 == key3;
+                Ok(statements_satisfy_transitivity && output_statement.code() == NativeStatement::Equal && output_statement.args()[0].key()? == key1 && output_statement.args()[1].key()? == key4)
+            },
+            GtToNotEqual => {
+                let s = self.args()[0].statement()?;
+                let arg_is_gt = s.code() == NativeStatement::Gt;
+                Ok(arg_is_gt && output_statement.code() == NativeStatement::NotEqual && output_statement.args() == s.args())
+            },
+            LtToNotEqual => {
+                let s = self.args()[0].statement()?;
+                let arg_is_lt = s.code() == NativeStatement::Lt;
+                Ok(arg_is_lt && output_statement.code() == NativeStatement::NotEqual && output_statement.args() == s.args())
+            },
+            // TODO: Remaining ops.
+            _ => Ok(true)
+        }
+    }
+}
 
 pub trait MainPod: fmt::Debug + DynClone {
     fn verify(&self) -> bool;
