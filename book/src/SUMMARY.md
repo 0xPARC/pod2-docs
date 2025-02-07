@@ -11,6 +11,7 @@
   - [MerkleTree](./merkletree.md)
 - [Deductions](./deductions.md)
   - [Statements](./statements.md)
+    - [Statements involving compound types and Merkle trees](./merklestatements.md)
   - [Operations](./operations.md)
 - [POD types](./podtypes.md)
   - [SignedPOD](./signedpod.md)

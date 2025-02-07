@@ -16,38 +16,55 @@ From the circuit (back-end) perspective, a statement can be proved either:
 The POD system has several builtin statements. These statements are associated to a reserved set of statement IDs.
 
 ```
-ValueOf(key: AnchoredKey, value: ScalarOrVec),
+ValueOf(key: AnchoredKey, value: ScalarOrVec)
 
-Equal(ak1: AnchoredKey, ak2: AnchoredKey),
+Equal(ak1: AnchoredKey, ak2: AnchoredKey)
 
-NotEqual(ak1: AnchoredKey, ak2: AnchoredKey),
+NotEqual(ak1: AnchoredKey, ak2: AnchoredKey)
 
-Gt(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+Gt(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer)
 
-Lt(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+Lt(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer)
 
-GEq(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+GEq(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer)
 
-LEq(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+LEq(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer)
 
 SumOf(sum: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: 
-AnchoredKey::Integer),
+AnchoredKey::Integer)
 
-ProductOf(prod: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: AnchoredKey::Integer),
+ProductOf(prod: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: AnchoredKey::Integer)
 
-MaxOf(max: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: AnchoredKey::Integer),
+MaxOf(max: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: AnchoredKey::Integer)
+```
 
-Branches(parent: AnchoredKey::MerkleTree, left: AnchoredKey::MerkleTree, right: AnchoredKey::MerkleTree),
+The following statements relate to Merkle trees and compound types; they are explained in detail on a [separate page](./merklestatements.md).
+```
+Branches(parent: AnchoredKey::MerkleTree, left: AnchoredKey::MerkleTree, right: AnchoredKey::MerkleTree)
 
-Leaf(node: AnchoredKey::MerkleTree, key: AnchoredKey, value: AnchoredKey),
+Leaf(node: AnchoredKey::MerkleTree, key: AnchoredKey, value: AnchoredKey)
 
-GoesLeft(key: AnchoredKey, depth: Value::Integer),
+IsNullTree(node: AnchoredKey::MerkleTree)
 
-GoesRight(key: AnchoredKey, depth: Value::Integer),
+GoesLeft(key: AnchoredKey, depth: Value::Integer)
+
+GoesRight(key: AnchoredKey, depth: Value::Integer)
+
+Contains(root: AnchoredKey::MerkleTree, key: AnchoredKey, value: AnchoredKey)
+
+MerkleSubtree(root: AnchoredKey::MerkleTree, node: AnchoredKey::MerkleTree)
+
+MerkleCorrectPath(root: AnchoredKey::MerkleTree, node: AnchoredKey::MerkleTree, key: AnchoredKey, depth: Value::Integer)
 
 Contains(root: AnchoredKey::MerkleTree, key: AnchoredKey, value: AnchoredKey)
 
 NotContains(root: AnchoredKey::MerkleTree, key: AnchoredKey)
+
+ContainsHashedKey(root: AnchoredKey::DictOrSet, key: AnchoredKey)
+
+NotContainsHashedKey(root: AnchoredKey::DictOrSet, key: AnchoredKey)
+
+ContainsValue(root: AnchoredKey::Array, value: AnchoredKey)
 ```
 
 
@@ -102,39 +119,8 @@ ecdsa_priv_to_pub_of(A.pubkey, B.privkey)
 
 ##### Primitive Built-in Statements for Merkle Roots
 
-Every Merkle root either:
-- is a special type of Merkle tree called a "leaf", which just has a single element, or
-- has two branches, left and right -- each of which is itself a Merkle tree.  Such a tree is called a "non-leaf" Merkle tree.
+[See separate page](./merklestatements.md).
 
-There are six built-in statements involving Merkle roots:
-```
-Branches(parent, left, right)
-```
-means that ```node``` is a non-leaf Merkle node, and ```left``` and ```right``` are its branches.
-```
-Leaf(node, key, value)
-```
-means that ```node``` is a leaf Merkle node, whose single item is the key-value pair ```(key, value)```.
-
-```
-GoesLeft(key, depth)
-```
-means that if ```key``` is contained in a sparse Merkle tree, then at depth ```depth```, it must be in the left branch.
-
-```
-GoesRight(key, depth)
-```
-means that if ```key``` is contained in a sparse Merkle tree, then at depth ```depth```, it must be in the right branch.
-
-```
-Contains(root, key, value)
-```
-means that the key-value pair ```(key, value)``` is contained in the Merkle tree with Merkle root ```root```.
-
-```
-NotContains(root, key)
-```
-means that the key ```key``` is not contained in the sparse Merkle tree with Merkle root ```root```.
 
 
 [^builtin]: <font color="red">TODO</font> List of built-in statements is not yet complete.
