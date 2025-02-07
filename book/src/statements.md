@@ -16,32 +16,48 @@ From the circuit (back-end) perspective, a statement can be proved either:
 The POD system has several builtin statements. These statements are associated to a reserved set of statement IDs.
 
 ```
-ValueOf(AnchoredKey, ScalarOrVec),
-Equal(AnchoredKey, AnchoredKey),
-NotEqual(AnchoredKey, AnchoredKey),
-IsGreater(AnchoredKey, AnchoredKey),
-IsLess(AnchoredKey, AnchoredKey),
-IsGreaterOrEqual(AnchoredKey, AnchoredKey),
-IsLessOrEqual(AnchoredKey, AnchoredKey),
-SumOf(AnchoredKey, AnchoredKey, AnchoredKey),
-ProductOf(AnchoredKey, AnchoredKey, AnchoredKey),
-MaxOf(AnchoredKey, AnchoredKey, AnchoredKey),
-Branches(AnchoredKey, AnchoredKey, AnchoredKey),
-Leaf(AnchoredKey, AnchoredKey, AnchoredKey),
-GoesLeft(AnchoredKey, AnchoredKey),
-GoesRight(AnchoredKey, AnchoredKey),
-Contains(AnchoredKey, AnchoredKey)
-DoesNotContain(AnchoredKey, AnchoredKey)
+ValueOf(key: AnchoredKey, value: ScalarOrVec),
+
+Equal(ak1: AnchoredKey, ak2: AnchoredKey),
+
+NotEqual(ak1: AnchoredKey, ak2: AnchoredKey),
+
+Gt(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+
+Lt(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+
+GEq(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+
+LEq(ak1: AnchoredKey::Integer, ak2: AnchoredKey::Integer),
+
+SumOf(sum: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: 
+AnchoredKey::Integer),
+
+ProductOf(prod: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: AnchoredKey::Integer),
+
+MaxOf(max: AnchoredKey::Integer, arg1: AnchoredKey::Integer, arg2: AnchoredKey::Integer),
+
+Branches(parent: AnchoredKey::MerkleTree, left: AnchoredKey::MerkleTree, right: AnchoredKey::MerkleTree),
+
+Leaf(node: AnchoredKey::MerkleTree, key: AnchoredKey, value: AnchoredKey),
+
+GoesLeft(key: AnchoredKey, depth: Value::Integer),
+
+GoesRight(key: AnchoredKey, depth: Value::Integer),
+
+Contains(root: AnchoredKey::MerkleTree, key: AnchoredKey, value: AnchoredKey)
+
+NotContains(root: AnchoredKey::MerkleTree, key: AnchoredKey)
 ```
 
 
 In the future, we may also reserve statement IDs for "precompiles" such as:
 ```
-poseidon_hash_of(A.hash, B.preimage) // perhaps a hash_of predicate can be parametrized by an enum representing the hash scheme; rather than having a bunch of specific things like SHA256_hash_of and poseidon_hash_of etc.
+PoseidonHashOf(A.hash, B.preimage) // perhaps a hash_of predicate can be parametrized by an enum representing the hash scheme; rather than having a bunch of specific things like SHA256_hash_of and poseidon_hash_of etc.
 ```
 
 ```
-ecdsa_priv_to_pub_of(A.pubkey, B.privkey)
+EcdsaPrivToPubOf(A.pubkey, B.privkey)
 ```
 
 ### Built-in statements for entries of any type
@@ -51,25 +67,25 @@ A ```ValueOf``` statement asserts that an entry has a certain value.
 ValueOf(A.name, "Arthur") 
 ```
 
-An ```IsEqual``` statement asserts that two entries have the same value.  (Technical note: The circuit only proves equality of field elements; no type checking is performed.  For strings or Merkle roots, collision-resistance of the hash gives a cryptographic guarantee of equality.)
+An ```Equal``` statement asserts that two entries have the same value.  (Technical note: The circuit only proves equality of field elements; no type checking is performed.  For strings or Merkle roots, collision-resistance of the hash gives a cryptographic guarantee of equality.  However, note both Arrays and Sets are implemented as dictionaries in the backend; the backend cannot type-check, so it is possible to prove an equality between an Array or Set and a Dictionary.)
 ```
-IsEqual(A.name, B.name)
+Equal(A.name, B.name)
 ```
 
-An ```IsUnequal``` statement asserts that two entries have different values.
+An ```NotEqual``` statement asserts that two entries have different values.
 ```
-IsUnequal   (for arbitrary types)
+NotEqual   (for arbitrary types)
 ```
 
 ##### Built-in Statements for Numerical Types
-An ```IsGreater(x, y)``` statement asserts that ```x``` is an entry of type ```Integer```, ```y``` is an entry or constant of type ```Integer```, and ```x > y```.
+An ```Gt(x, y)``` statement asserts that ```x``` is an entry of type ```Integer```, ```y``` is an entry or constant of type ```Integer```, and ```x > y```.
 ```
-is_greater    (for numerical types only)
-is_greater(A.price, 100)
-is_greater(A.price, B.balance)
+Gt    (for numerical types only)
+Gt(A.price, 100)
+Gt(A.price, B.balance)
 ```
 
-The statements ```IsLess```, ```IsGreaterOrEqual```, ```IsLessOrEqual``` are defined analogously.
+The statements ```Lt```, ```GEq```, ```Leq``` are defined analogously.
 
 ```SumOf(x, y, z)``` asserts that ```x```, ```y```, ```z``` are entries of type ```Integer```, and [^fillsum]
 
@@ -92,34 +108,33 @@ Every Merkle root either:
 
 There are six built-in statements involving Merkle roots:
 ```
-Branches(node, left, right, depth)
+Branches(parent, left, right)
 ```
-means that ```node``` is a non-leaf Merkle node at depth ```depth```, and ```left``` and ```right``` are its branches.
+means that ```node``` is a non-leaf Merkle node, and ```left``` and ```right``` are its branches.
 ```
-Leaf(node, item)
+Leaf(node, key, value)
 ```
-means that ```node``` is a leaf Merkle node, whose single item is ```item```.
+means that ```node``` is a leaf Merkle node, whose single item is the key-value pair ```(key, value)```.
 
 ```
-GoesLeft(node, item, depth)
+GoesLeft(key, depth)
 ```
-means that ```node``` is a non-leaf Merkle node at depth ```depth```, and if ```item``` is contained under ```node```, it must be in the left branch.
+means that if ```key``` is contained in a sparse Merkle tree, then at depth ```depth```, it must be in the left branch.
 
 ```
-GoesRight(node, item, depth)
+GoesRight(key, depth)
 ```
-means that ```tree``` is a non-leaf Merkle node at depth ```depth```, and if ```item``` is contained under ```node```, it must be in the right branch.
-
-
-```
-Contains(tree, item)
-```
-means that ```item``` is contained in the Merkle tree ```tree```.
+means that if ```key``` is contained in a sparse Merkle tree, then at depth ```depth```, it must be in the right branch.
 
 ```
-DoesNotContain(tree, item)
+Contains(root, key, value)
 ```
-means that ```item``` is not contained in the Merkle tree ```tree```.
+means that the key-value pair ```(key, value)``` is contained in the Merkle tree with Merkle root ```root```.
+
+```
+NotContains(root, key)
+```
+means that the key ```key``` is not contained in the sparse Merkle tree with Merkle root ```root```.
 
 
 [^builtin]: <font color="red">TODO</font> List of built-in statements is not yet complete.
