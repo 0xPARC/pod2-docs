@@ -19,3 +19,4 @@ The gadget ID takes on the values in the following table:
 | 2         | `MainPOD` gadget: The key-value pair was produced in the construction of a `MainPOD`.     |
 
 For example, a gadget ID of 1 implies that the key-value pair in question was produced in the process of constructing a `SignedPOD`.
+[^content-id]: <font color="red">TODO</font> Refer to this when it is documented.
