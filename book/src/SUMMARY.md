@@ -13,7 +13,6 @@
   - [Statements](./statements.md)
     - [Statements involving compound types and Merkle trees](./merklestatements.md)
   - [Operations](./operations.md)
-  - [Custom statements and custom operations](./custom.md)
 - [POD types](./podtypes.md)
   - [SignedPOD](./signedpod.md)
   - [MainPOD](./mainpod.md)
