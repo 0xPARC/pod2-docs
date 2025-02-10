@@ -502,14 +502,14 @@ impl Printer {
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use crate::frontend;
+    use crate::examples::{zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
     use crate::middleware;
 
     #[test]
     fn test_mock_main_0() {
         let params = middleware::Params::default();
 
-        let (gov_id_builder, pay_stub_builder) = frontend::tests::zu_kyc_sign_pod_builders(&params);
+        let (gov_id_builder, pay_stub_builder) = zu_kyc_sign_pod_builders(&params);
         let mut signer = MockSigner {
             pk: "ZooGov".into(),
         };
@@ -518,7 +518,7 @@ pub mod tests {
             pk: "ZooDeel".into(),
         };
         let pay_stub_pod = pay_stub_builder.sign(&mut signer).unwrap();
-        let kyc_builder = frontend::tests::zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod);
+        let kyc_builder = zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod);
 
         let mut prover = MockProver {};
         let kyc_pod = kyc_builder.prove(&mut prover).unwrap();
