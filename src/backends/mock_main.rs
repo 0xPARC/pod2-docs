@@ -408,6 +408,8 @@ impl MainPod for MockMainPod {
             .is_some();
         // check that all `input_statements` of type `ValueOf` with origin=SELF have unique keys
         // (no duplicates)
+        // TODO: Instead of doing this, do a uniqueness check when verifying the output of a
+        // `NewValue` operation.
         let value_ofs_unique = {
             let key_id_pairs = input_statements
                 .into_iter()

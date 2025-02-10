@@ -377,6 +377,7 @@ impl ToFields for StatementArg {
     }
 }
 
+// TODO: Replace this with a more stringly typed enum as in the Devcon implementation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
 
@@ -471,6 +472,7 @@ impl OperationArg {
     }
 }
 
+// TODO: Replace this with a more stringly typed enum as in the Devcon implementation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
@@ -482,6 +484,7 @@ impl Operation {
         &self.1
     }
     // TODO: Argument checking.
+    // TODO: Use `Err` for all type mismatches rather than `false`.
     /// Checks the given operation against a statement.
     pub fn check(&self, output_statement: Statement) -> Result<bool> {
         use NativeOperation::*;
