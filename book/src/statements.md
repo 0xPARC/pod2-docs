@@ -5,11 +5,12 @@ A _statement_ is any sort of claim about the values of entries: for example, tha
 Statements come in two types: _built-in_ and _custom_.  There is a short list of built-in statements (see below). [^builtin]
 In addition, users can freely define custom statements.
 
-From the user (front-end) perspective, a statement represents a claim about the values of some number of entries -- the statement can only be proved if the claim is true.
+From the user (front-end) perspective, a statement represents a claim about the values of some number of entries -- the statement can only be proved if the claim is true.  On the front end, a statement is identified by its _name_ (`ValueOf`, `Equal`, etc.).
 
 From the circuit (back-end) perspective, a statement can be proved either:
 - by direct in-circuit verification, or
 - by an operation (aka deduction rule).
+On the back end, a statement is identified by a unique numerical _identifier_.
 
 ## Built-in statements
 
