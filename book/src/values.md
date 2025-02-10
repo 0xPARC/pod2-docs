@@ -18,11 +18,26 @@ In the case of the Plonky2 backend, this is done by decomposing such an integer 
 $$x = x_0 + x_1 \cdot 2^{32}$$
 with $0 \leq x_0, x_1 < 2^{32}$ and representing it as
 $$\texttt{map}\ \iota\ [x_0, x_1, 0, 0],$$
-where $\iota:\mathbb{N}\rightarrow\texttt{GoldilocksField}$ is the canonical projection.
+where $\iota:\mathbb{N}\cup\{0\}\rightarrow\texttt{GoldilocksField}$ is the canonical projection.
 
 
 ## `String`
-In the frontend, this type corresponds to the usual `String`. In the backend, the string will be mapped to a sequence of field elements[^String] and hashed with the hash function employed there, thus being represented by its hash.
+In the frontend, this type corresponds to the usual `String`. In the backend, the string will be mapped to a sequence of field elements and hashed with the hash function employed there, thus being represented by its hash.
+
+In the case of the Plonky2 backend, the string is converted to a sequence of bytes with the byte `0x01` appended as  padding, then the bytes are split into 7-byte chunks starting from the left, these chunks then being interpreted as integers in little-endian form, each of which is naturally an element of `GoldilocksField`, whence the resulting sequence may be hashed via the Poseidon hash function. Symbolically, given a string $s$, its hash is defined by
+
+$$\texttt{poseidon}(\texttt{map}\ (\iota\circ\jmath_\texttt{le-bytes->int})\ \texttt{chunks}_7(\jmath_\texttt{string->bytes}(s)\ \texttt{++}\ [\texttt{0x01}])),$$
+
+where `poseidon` is the Poseidon instance used by Plonky2, $\iota$ is as above, $\texttt{chunks}_{n}:[\texttt{u8}]\rightarrow [[\texttt{u8}]]$ is defined such that[^aux]
+
+$$\texttt{chunks}_n(v) = \textup{if}\ v = [\ ]\ \textup{then}\ [\ ]\ \textup{else}\ [\texttt{take}_n v]\ \texttt{++}\ \texttt{chunks}_n(\texttt{drop}_n v),$$
+
+the mapping $\jmath_\texttt{le-bytes->int}: [u8] \rightarrow{N}\cup\{0\}$ is given by
+
+$$[b_0,\dots,b_{N-1}]\mapsto \sum_{i=0}^{N-1} b_i \cdot 2^{8i},$$
+
+and $\jmath_\texttt{string->bytes}$ is the canonical mapping of a string to its UTF-8 representation.
+
 
 
 ## Dictionary, array, set
@@ -48,5 +63,5 @@ In the three types, the merkletree under the hood allows to prove inclusion & no
 
 [^type]: <font color="red">TODO</font> In POD 1, there is the `cryptographic` type, which has the same type of the output of the hash function employed there. It is useful for representing arbitrary hashes. Do we want to expand our type list to include a similar type, which would correspond to the `HashOut` type in the case of Plonky2? This would not have a uniform representation in the frontend if we continue to be backend agnostic unless we fix the number of bits to e.g. 256, in which case we would actually need one more field element in the case of Plonky2.
 [^i64]: <font color="red">TODO</font> Replace this with `i64` once operational details have been worked out.
-[^String]: <font color="red">TODO</font> Adopt or recommend a particular approach, e.g. mapping the string to bytes and separating it into chunks with appropriate padding.
-
+[^aux]: Definitions of `drop` and `take` may be found [here](https://hackage.haskell.org/package/haskell98-2.0.0.3/docs/Prelude.html#v:drop) and [here](https://hackage.haskell.org/package/haskell98-2.0.0.3/docs/Prelude.html#v:take).
+                      

@@ -7,7 +7,6 @@ use plonky2::field::types::Field;
 use std::collections::HashMap;
 use std::convert::From;
 use std::fmt;
-use std::io::{self, Write};
 
 use crate::middleware::{
     self, hash_str, Hash, MainPodInputs, NativeOperation, NativeStatement, Params, PodId,
@@ -119,6 +118,20 @@ pub struct SignedPod {
     pub key_string_map: HashMap<Hash, String>,
 }
 
+impl fmt::Display for SignedPod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "SignedPod (id:{}):", self.id())?;
+        // Note: current version iterates sorting by keys of the kvs, but the merkletree defined at
+        // https://0xparc.github.io/pod2/merkletree.html will not need it since it will be
+        // deterministic based on the keys values not on the order of the keys when added into the
+        // tree.
+        for (k, v) in self.pod.kvs().iter().sorted_by_key(|kv| kv.0) {
+            writeln!(f, "  - {}: {}", k, v)?;
+        }
+        Ok(())
+    }
+}
+
 impl SignedPod {
     pub fn id(&self) -> PodId {
         self.pod.id()
@@ -176,6 +189,17 @@ pub enum OperationArg {
     Entry(String, Value),
 }
 
+impl fmt::Display for OperationArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OperationArg::Statement(s) => write!(f, "{}", s),
+            OperationArg::Key(k) => write!(f, "{}.{}", k.0 .1, k.1),
+            OperationArg::Literal(v) => write!(f, "{}", v),
+            OperationArg::Entry(k, v) => write!(f, "({}, {})", k, v),
+        }
+    }
+}
+
 impl From<Value> for OperationArg {
     fn from(v: Value) -> Self {
         Self::Literal(v)
@@ -215,6 +239,19 @@ impl From<(&SignedPod, &str)> for OperationArg {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?} ", self.0)?;
+        for (i, arg) in self.1.iter().enumerate() {
+            if i != 0 {
+                write!(f, " ")?;
+            }
+            write!(f, "{}", arg)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct MainPodBuilder {
     pub params: Params,
@@ -225,6 +262,27 @@ pub struct MainPodBuilder {
     pub public_statements: Vec<Statement>,
     // Internal state
     const_cnt: usize,
+}
+
+impl fmt::Display for MainPodBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "MainPod:")?;
+        writeln!(f, "  input_signed_pods:")?;
+        for in_pod in &self.input_signed_pods {
+            writeln!(f, "    - {}", in_pod.id())?;
+        }
+        writeln!(f, "  input_main_pods:")?;
+        for in_pod in &self.input_main_pods {
+            writeln!(f, "    - {}", in_pod.id())?;
+        }
+        writeln!(f, "  statements:")?;
+        for (st, op) in self.statements.iter().zip_eq(self.operations.iter()) {
+            write!(f, "    - {} <- ", st)?;
+            write!(f, "{}", op)?;
+            write!(f, "\n")?;
+        }
+        Ok(())
+    }
 }
 
 impl MainPodBuilder {
@@ -484,70 +542,13 @@ impl MainPodCompiler {
     }
 }
 
-pub struct Printer {}
-
-impl Printer {
-    pub fn fmt_op_arg(&self, w: &mut dyn Write, arg: &OperationArg) -> io::Result<()> {
-        match arg {
-            OperationArg::Statement(s) => write!(w, "{}", s),
-            OperationArg::Key(k) => write!(w, "{}.{}", k.0 .1, k.1),
-            OperationArg::Literal(v) => write!(w, "{}", v),
-            OperationArg::Entry(k, v) => write!(w, "({}, {})", k, v),
-        }
-    }
-
-    pub fn fmt_op(&self, w: &mut dyn Write, op: &Operation) -> io::Result<()> {
-        write!(w, "{:?} ", op.0)?;
-        for (i, arg) in op.1.iter().enumerate() {
-            if i != 0 {
-                write!(w, " ")?;
-            }
-            self.fmt_op_arg(w, arg)?;
-        }
-        Ok(())
-    }
-
-    // TODO fn fmt_signed_pod_builder
-
-    pub fn fmt_signed_pod(&self, w: &mut dyn Write, pod: &SignedPod) -> io::Result<()> {
-        writeln!(w, "SignedPod (id:{}):", pod.id())?;
-        // Note: current version iterates sorting by keys of the kvs, but the merkletree defined at
-        // https://0xparc.github.io/pod2/merkletree.html will not need it since it will be
-        // deterministic based on the keys values not on the order of the keys when added into the
-        // tree.
-        for (k, v) in pod.pod.kvs().iter().sorted_by_key(|kv| kv.0) {
-            writeln!(w, "  - {}: {}", k, v)?;
-        }
-        Ok(())
-    }
-
-    pub fn fmt_main_pod_builder(&self, w: &mut dyn Write, pod: &MainPodBuilder) -> io::Result<()> {
-        writeln!(w, "MainPod:")?;
-        writeln!(w, "  input_signed_pods:")?;
-        for in_pod in &pod.input_signed_pods {
-            writeln!(w, "    - {}", in_pod.id())?;
-        }
-        writeln!(w, "  input_main_pods:")?;
-        for in_pod in &pod.input_main_pods {
-            writeln!(w, "    - {}", in_pod.id())?;
-        }
-        writeln!(w, "  statements:")?;
-        for (st, op) in pod.statements.iter().zip_eq(pod.operations.iter()) {
-            write!(w, "    - {} <- ", st)?;
-            self.fmt_op(w, op)?;
-            write!(w, "\n")?;
-        }
-        Ok(())
-    }
-
-    // TODO fn fmt_main_pod
-}
+// TODO fn fmt_signed_pod_builder
+// TODO fn fmt_main_pod
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use std::io;
 
     macro_rules! args {
         ($($arg:expr),+) => {vec![$(OperationArg::from($arg)),*]}
@@ -601,9 +602,6 @@ pub mod tests {
 
     #[test]
     fn test_front_0() -> Result<()> {
-        let printer = Printer {};
-        let mut w = io::stdout();
-
         let params = Params::default();
         let (gov_id, pay_stub) = zu_kyc_sign_pod_builders(&params);
 
@@ -613,16 +611,16 @@ pub mod tests {
             pk: "ZooGov".into(),
         };
         let gov_id = gov_id.sign(&mut signer).unwrap();
-        printer.fmt_signed_pod(&mut w, &gov_id).unwrap();
+        println!("{}", gov_id);
 
         let mut signer = MockSigner {
             pk: "ZooDeel".into(),
         };
         let pay_stub = pay_stub.sign(&mut signer).unwrap();
-        printer.fmt_signed_pod(&mut w, &pay_stub).unwrap();
+        println!("{}", pay_stub);
 
         let kyc = zu_kyc_pod_builder(&params, &gov_id, &pay_stub);
-        printer.fmt_main_pod_builder(&mut w, &kyc).unwrap();
+        println!("{}", kyc);
 
         // TODO: prove kyc with MockProver and print it
 
