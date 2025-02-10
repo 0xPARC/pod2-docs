@@ -40,7 +40,7 @@ Every Merkle root either:
 ```
 Branches(parent, left, right)
 ```
-means that ```node``` is a non-leaf Merkle node, and ```left``` and ```right``` are its branches.  
+means that ```parent``` is a non-leaf Merkle node, and ```left``` and ```right``` are its branches.  
 
 A `Branches` statement is proved by computing a hash, as specified on [the Merkle tree page](./merkletree.md).
 
