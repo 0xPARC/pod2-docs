@@ -64,14 +64,24 @@ hash(6) = 001...
 
 The resulting tree looks like:
 ```
-                root
-              /      \
-           L_root   R_root = hash(0)
-          /      \
-      LL_root   LR_root = hash((4, "even", 1))
-      /    \
-          LLR_root = hash((5, "odd", 1))
-LLL_root = hash((6, "even", 1)).
+                        root
+                         /\   
+                        /  \  
+                       /    \ 
+                      /      \
+                   L_root   R_root = hash(0)
+                     /\       
+                    /  \                             
+                   /    \     
+                  /      \    
+               LL_root  LR_root = hash((4, "even", 1))
+                 /\           
+                /  \          
+               /    \         
+              /      \        
+        LLL_root   LLR_root = hash((5, "odd", 1))
+          ||          
+  hash((6, "even", 1))
 ```
 
 The intermediate roots are computed as hashes of their subroots:
