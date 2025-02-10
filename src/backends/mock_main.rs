@@ -484,11 +484,11 @@ impl MainPod for MockMainPod {
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use crate::examples::{zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
+    use crate::examples::{great_boy_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
     use crate::middleware;
 
     #[test]
-    fn test_mock_main_0() {
+    fn test_mock_main_zu_kyc() {
         let params = middleware::Params::default();
 
         let (gov_id_builder, pay_stub_builder) = zu_kyc_sign_pod_builders(&params);
@@ -511,5 +511,22 @@ pub mod tests {
         assert_eq!(pod.verify(), true); // TODO
                                         // println!("id: {}", pod.id());
                                         // println!("pub_statements: {:?}", pod.pub_statements());
+    }
+
+    #[test]
+    fn test_mock_main_great_boy() {
+        let great_boy_builder = great_boy_pod_full_flow();
+
+        let mut prover = MockProver {};
+        let great_boy_pod = great_boy_builder.prove(&mut prover).unwrap();
+        let pod = great_boy_pod
+            .pod
+            .into_any()
+            .downcast::<MockMainPod>()
+            .unwrap();
+
+        println!("{}", pod);
+
+        assert_eq!(pod.verify(), true);
     }
 }

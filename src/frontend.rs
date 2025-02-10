@@ -579,11 +579,10 @@ pub mod build_utils {
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use crate::examples::{zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
-    use std::io;
+    use crate::examples::{great_boy_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
 
     #[test]
-    fn test_front_0() -> Result<()> {
+    fn test_front_zu_kyc() -> Result<()> {
         let params = Params::default();
         let (gov_id, pay_stub) = zu_kyc_sign_pod_builders(&params);
 
@@ -603,6 +602,16 @@ pub mod tests {
 
         let kyc = zu_kyc_pod_builder(&params, &gov_id, &pay_stub);
         println!("{}", kyc);
+
+        // TODO: prove kyc with MockProver and print it
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_front_great_boy() -> Result<()> {
+        let great_boy = great_boy_pod_full_flow();
+        println!("{}", great_boy);
 
         // TODO: prove kyc with MockProver and print it
 

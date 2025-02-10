@@ -99,30 +99,40 @@ statement loan_check(receiver: string):
 A Good Boy Pod exposes one custom statement with one custom deduction rule.
 
 ```
-statement good_boy(receiver: PubKey, good_boy_issuers: MerkleTree):
+statement is_good_boy(user: PubKey, good_boy_issuers: MerkleTree):
    - OR():
-      - AND(pod: Pod):
-         # A good boy issuer is my friend
+      - AND(pod: Pod, age: Int):
          - eq(pod.type, SIGNATURE)
          - contains(good_boy_issuers, pod.signer)
-         - eq(pod.friend, receiver)
+         # A good boy issuer says this user is a good boy
+         - eq(pod.user, user)
+         - eq(pod.age, age)
+```
+
+A Friend Pod exposes one custom statement with one custom deduction rule.
+
+```
+statement is_friend(good_boy: PubKey, friend: PubKey, good_boy_issuers: MerkleTree):
+   - OR():
+      - AND(friend_pod: Pod):
+         - eq(pod.type, SIGNATURE)
+         # The issuer is a good boy
+         - is_good_boy(good_boy, good_boy_issuers)
+         # A good boy says this is their friend
+         - eq(pod.signer, good_boy)
+         - eq(pod.friend, friend)
 ```
 
 A Great Boy Pod exposes (in addition to the above) one new custom statement
 with one custom deduction rule.
 
 ```
-statement great_boy(receiver: PubKey, good_boy_issuers: MerkleTree):
+statement is_great_boy(great_boy: PubKey, good_boy_issuers: MerkleTree):
    - OR():
       - AND(friend_pod_0: Pod, friend_pod_1: Pod):
-         # good boy 0 is my friend
-         - eq(friend_pod_0.type, SIGNATURE)
-         - good_boy(friend_pod_0.signer, good_boy_issuers)
-         - eq(friend_pod_0.friend, receiver)
-         # good boy 1 is my friend
-         - eq(friend_pod_1.type, SIGNATURE)
-         - good_boy(friend_pod_1.signer, good_boy_issuers)
-         - eq(friend_pod_1.friend, receiver)
+         # Two good boys consider this user their friend
+         - is_friend(friend_pod_0.signer, great_boy)
+         - is_friend(friend_pod_1.signer, great_boy)
          # good boy 0 != good boy 1
          - neq(friend_pod_0.signer, friend_pod_1.signer)
 ``` 
