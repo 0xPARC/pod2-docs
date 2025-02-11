@@ -27,12 +27,16 @@ const CAP_HEIGHT: usize = 0;
 pub struct MerkleTree {
     tree: PlonkyMerkleTree<F, <C as GenericConfig<D>>::Hasher>,
     // keyindex: key -> index mapping. This is just for the current plonky-tree wrapper
-    keyindex: HashMap<Hash, usize>,
+    keyindex: HashMap<Value, usize>,
     // kvs are a field in the MerkleTree in order to be able to iterate over the keyvalues. This is
     // specific of the current implementation (Plonky2's tree wrapper), in the next iteration this
     // will not be needed since the tree implementation itself will offer the hashmap
     // functionality.
-    kvs: HashMap<Hash, Value>,
+    pub kvs: HashMap<Value, Value>,
+    // leaves_map is a map between the leaf (leaf=Hash(key,value)) and the actual (key, value). It
+    // is used to get the actual value from a leaf for a given key (through the method
+    // `MerkleTree.get`.
+    leaves_map: HashMap<Hash, (Value, Value)>,
 }
 
 pub struct MerkleProof {
@@ -42,9 +46,10 @@ pub struct MerkleProof {
 }
 
 impl MerkleTree {
-    pub fn new(kvs: &HashMap<Hash, Value>) -> Self {
-        let mut keyindex: HashMap<Hash, usize> = HashMap::new();
+    pub fn new(kvs: &HashMap<Value, Value>) -> Self {
+        let mut keyindex: HashMap<Value, usize> = HashMap::new();
         let mut leaves: Vec<Vec<F>> = Vec::new();
+        let mut leaves_map: HashMap<Hash, (Value, Value)> = HashMap::new();
         // Note: current version iterates sorting by keys of the kvs, but the merkletree defined at
         // https://0xparc.github.io/pod2/merkletree.html will not need it since it will be
         // deterministic based on the keys values not on the order of the keys when added into the
@@ -54,6 +59,7 @@ impl MerkleTree {
             let leaf = PoseidonHash::hash_no_pad(&input).elements;
             leaves.push(leaf.into());
             keyindex.insert(*k, i);
+            leaves_map.insert(Hash(leaf), (*k, *v));
         }
 
         // pad to a power of two if needed
@@ -67,17 +73,29 @@ impl MerkleTree {
             tree,
             keyindex,
             kvs: kvs.clone(),
+            leaves_map,
         }
     }
 
-    pub fn root(&self) -> Result<Hash> {
+    pub fn root(&self) -> Hash {
         if self.tree.cap.is_empty() {
-            return Err(anyhow!("empty tree"));
+            return crate::middleware::NULL;
         }
-        Ok(Hash(self.tree.cap.0[0].elements))
+        Hash(self.tree.cap.0[0].elements)
     }
 
-    pub fn prove(&self, key: &Hash) -> Result<MerkleProof> {
+    pub fn get(&self, key: &Value) -> Result<Value> {
+        let i = self.keyindex.get(&key).ok_or(anyhow!("key not in tree"))?;
+        let leaf_hash_raw = self.tree.get(*i);
+        let leaf_hash_f: [F; 4] = leaf_hash_raw
+            .try_into()
+            .map_err(|_| anyhow!("unexpected length (len!=4)"))?;
+        let leaf_hash: Hash = Hash(leaf_hash_f);
+        let (_, value) = self.leaves_map.get(&leaf_hash).unwrap();
+        Ok(*value)
+    }
+
+    pub fn prove(&self, key: &Value) -> Result<MerkleProof> {
         let i = self.keyindex.get(&key).ok_or(anyhow!("key not in tree"))?;
         let proof = self.tree.prove(*i);
         Ok(MerkleProof {
@@ -87,7 +105,7 @@ impl MerkleTree {
         })
     }
 
-    pub fn prove_nonexistence(&self, _key: &Hash) -> Result<MerkleProof> {
+    pub fn prove_nonexistence(&self, _key: &Value) -> Result<MerkleProof> {
         // mock method
         println!("WARNING: MerkleTree::verify_nonexistence is currently a mock");
         Ok(MerkleProof {
@@ -97,7 +115,7 @@ impl MerkleTree {
         })
     }
 
-    pub fn verify(root: Hash, proof: &MerkleProof, key: &Hash, value: &Value) -> Result<()> {
+    pub fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
         if !proof.existence {
             return Err(anyhow!(
                 "expected proof of existence, found proof of non-existence"
@@ -111,7 +129,7 @@ impl MerkleTree {
     pub fn verify_nonexistence(
         _root: Hash,
         proof: &MerkleProof,
-        _key: &Hash,
+        _key: &Value,
         _value: &Value,
     ) -> Result<()> {
         // mock method
@@ -124,18 +142,14 @@ impl MerkleTree {
         Ok(())
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Iter<Hash, Value> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
         self.kvs.iter()
-    }
-
-    pub fn kvs(&self) -> &HashMap<Hash, Value> {
-        &self.kvs
     }
 }
 
 impl<'a> IntoIterator for &'a MerkleTree {
-    type Item = (&'a Hash, &'a Value);
-    type IntoIter = std::collections::hash_map::Iter<'a, Hash, Value>;
+    type Item = (&'a Value, &'a Value);
+    type IntoIter = std::collections::hash_map::Iter<'a, Value, Value>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.kvs.iter()
@@ -151,15 +165,15 @@ pub mod tests {
     #[test]
     fn test_merkletree() -> Result<()> {
         let (k0, v0) = (
-            hash_str("key_0".into()),
+            Value(hash_str("key_0".into()).0),
             Value(hash_str("value_0".into()).0),
         );
         let (k1, v1) = (
-            hash_str("key_1".into()),
+            Value(hash_str("key_1".into()).0),
             Value(hash_str("value_1".into()).0),
         );
         let (k2, v2) = (
-            hash_str("key_2".into()),
+            Value(hash_str("key_2".into()).0),
             Value(hash_str("value_2".into()).0),
         );
 
@@ -171,18 +185,18 @@ pub mod tests {
         let tree = MerkleTree::new(&kvs);
 
         let proof = tree.prove(&k2)?;
-        MerkleTree::verify(tree.root()?, &proof, &k2, &v2)?;
+        MerkleTree::verify(tree.root(), &proof, &k2, &v2)?;
 
         // expect verification to fail with different key / value
-        assert!(MerkleTree::verify(tree.root()?, &proof, &k2, &v0).is_err());
-        assert!(MerkleTree::verify(tree.root()?, &proof, &k0, &v2).is_err());
+        assert!(MerkleTree::verify(tree.root(), &proof, &k2, &v0).is_err());
+        assert!(MerkleTree::verify(tree.root(), &proof, &k0, &v2).is_err());
 
         // non-existence proofs
         let proof_ne = tree.prove_nonexistence(&k2)?;
-        let _ = MerkleTree::verify_nonexistence(tree.root()?, &proof_ne, &k2, &v2)?;
+        let _ = MerkleTree::verify_nonexistence(tree.root(), &proof_ne, &k2, &v2)?;
 
         // expect verification of existence fail for nonexistence proof
-        let _ = MerkleTree::verify(tree.root()?, &proof_ne, &k2, &v2).is_err();
+        let _ = MerkleTree::verify(tree.root(), &proof_ne, &k2, &v2).is_err();
 
         Ok(())
     }

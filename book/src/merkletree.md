@@ -149,12 +149,15 @@ impl MerkleTree {
     fn new(kvs: HashMap<Value, Value>) -> Self;
     
     /// returns the root of the tree
-    fn root(&self) -> Result<Hash>;
+    fn root(&self) -> Hash;
+    
+    /// returns the value at the given key
+    pub fn get(&self, key: &Value) -> Value;
     
     /// returns a proof of existence, which proves that the given key exists in
     /// the tree. It returns the `value` of the leaf at the given `key`, and
     /// the `MerkleProof`.
-    fn prove(&self, key: &Value) -> Result<(Value, MerkleProof)>;
+    fn prove(&self, key: &Value) -> Result<MerkleProof>;
     
     /// returns a proof of non-existence, which proves that the given `key`
     /// does not exist in the tree

@@ -9,7 +9,6 @@ use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::Hasher;
 use std::any::Any;
 use std::fmt;
-use std::io::{self, Write};
 
 pub struct MockProver {}
 

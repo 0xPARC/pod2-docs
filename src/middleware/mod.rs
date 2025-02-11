@@ -12,8 +12,10 @@ use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
 use std::any::Any;
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;
-use std::{array, fmt};
+use std::fmt;
 use strum_macros::FromRepr;
+
+pub mod containers;
 
 pub const KEY_SIGNER: &str = "_signer";
 pub const KEY_TYPE: &str = "_type";
@@ -54,6 +56,12 @@ impl From<i64> for Value {
         let lo = F::from_canonical_u64((v as u64) & 0xffffffff);
         let hi = F::from_canonical_u64((v as u64) >> 32);
         Value([lo, hi, F::ZERO, F::ZERO])
+    }
+}
+
+impl From<Hash> for Value {
+    fn from(h: Hash) -> Self {
+        Value(h.0)
     }
 }
 
@@ -109,6 +117,7 @@ impl PartialOrd for Hash {
     }
 }
 
+pub const EMPTY: Value = Value([F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
 pub const NULL: Hash = Hash([F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
 
 impl fmt::Display for Hash {

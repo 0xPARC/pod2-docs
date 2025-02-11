@@ -3,14 +3,15 @@
 
 use anyhow::Result;
 use itertools::Itertools;
-use plonky2::field::types::Field;
 use std::collections::HashMap;
 use std::convert::From;
 use std::fmt;
 
 use crate::middleware::{
-    self, hash_str, Hash, MainPodInputs, NativeOperation, NativeStatement, Params, PodId,
-    PodProver, PodSigner, F, SELF,
+    self,
+    containers::{Array, Container, Dictionary, Set},
+    hash_str, Hash, MainPodInputs, NativeOperation, NativeStatement, Params, PodId, PodProver,
+    PodSigner, SELF,
 };
 
 /// This type is just for presentation purposes.
@@ -26,15 +27,12 @@ pub enum PodClass {
 pub struct Origin(pub PodClass, pub PodId);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MerkleTree {
-    pub root: u8, // TODO
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     String(String),
     Int(i64),
-    MerkleTree(MerkleTree),
+    Dictionary(Dictionary),
+    Set(Set),
+    Array(Array),
 }
 
 impl From<&str> for Value {
@@ -54,13 +52,9 @@ impl From<&Value> for middleware::Value {
         match v {
             Value::String(s) => middleware::Value(hash_str(s).0),
             Value::Int(v) => middleware::Value::from(*v),
-            // TODO
-            Value::MerkleTree(mt) => middleware::Value([
-                F::from_canonical_u64(mt.root as u64),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]),
+            Value::Dictionary(d) => middleware::Value(d.cm().0),
+            Value::Set(s) => middleware::Value(s.cm().0),
+            Value::Array(a) => middleware::Value(a.cm().0),
         }
     }
 }
@@ -70,7 +64,9 @@ impl fmt::Display for Value {
         match self {
             Value::String(s) => write!(f, "\"{}\"", s),
             Value::Int(v) => write!(f, "{}", v),
-            Value::MerkleTree(mt) => write!(f, "mt:{}", mt.root),
+            Value::Dictionary(d) => write!(f, "dict:{}", d.cm()),
+            Value::Set(s) => write!(f, "set:{}", s.cm()),
+            Value::Array(a) => write!(f, "arr:{}", a.cm()),
         }
     }
 }

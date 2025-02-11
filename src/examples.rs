@@ -1,5 +1,10 @@
-use crate::frontend::{MainPodBuilder, MerkleTree, SignedPod, SignedPodBuilder, Value};
-use crate::middleware::{Params, PodType, KEY_SIGNER, KEY_TYPE};
+use std::collections::HashMap;
+
+use crate::frontend::{MainPodBuilder, SignedPod, SignedPodBuilder, Value};
+use crate::middleware::{
+    containers::{Container, Dictionary},
+    Params, PodType, KEY_SIGNER, KEY_TYPE,
+};
 use crate::op;
 
 // ZuKYC
@@ -22,7 +27,7 @@ pub fn zu_kyc_pod_builder(
     gov_id: &SignedPod,
     pay_stub: &SignedPod,
 ) -> MainPodBuilder {
-    let sanction_list = Value::MerkleTree(MerkleTree { root: 1 });
+    let sanction_list = Value::Dictionary(Dictionary::new(&HashMap::new())); // empty dictionary
     let now_minus_18y: i64 = 1169909388;
     let now_minus_1y: i64 = 1706367566;
 
@@ -178,7 +183,7 @@ pub fn great_boy_pod_full_flow() -> MainPodBuilder {
     alice_friend_pods.push(friend.sign(&mut bob_signer).unwrap());
     alice_friend_pods.push(friend.sign(&mut charlie_signer).unwrap());
 
-    let good_boy_issuers_mt = Value::MerkleTree(MerkleTree { root: 33 });
+    let good_boy_issuers_dict = Value::Dictionary(Dictionary::new(&HashMap::new())); // empty
     great_boy_pod_builder(
         &params,
         [
@@ -188,7 +193,7 @@ pub fn great_boy_pod_full_flow() -> MainPodBuilder {
             &charlie_good_boys[1],
         ],
         [&alice_friend_pods[0], &alice_friend_pods[1]],
-        &good_boy_issuers_mt,
+        &good_boy_issuers_dict,
         alice,
     )
 }

@@ -59,7 +59,6 @@ The array, set and dictionary types are similar types. While all of them use [a 
 
 In the three types, the merkletree under the hood allows to prove inclusion & non-inclusion of the particular entry of the {dictionary/array/set} element.
 
-
 <br><br>
 
 ---
