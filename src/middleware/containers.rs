@@ -57,7 +57,7 @@ impl<'a> IntoIterator for &'a Dictionary {
 
 impl PartialEq for Dictionary {
     fn eq(&self, other: &Self) -> bool {
-        self.mt.root() == other.mt.root() && self.mt.root() == other.mt.root()
+        self.mt.root() == other.mt.root()
     }
 }
 impl Eq for Dictionary {}
@@ -87,19 +87,19 @@ impl Set {
         self.mt.root()
     }
     pub fn contains(&self, value: &Value) -> bool {
-        self.mt.contains(key)
+        self.mt.contains(value)
     }
     pub fn prove(&self, value: &Value) -> Result<MerkleProof> {
-        self.mt.prove(key)
+        self.mt.prove(value)
     }
     pub fn prove_nonexistence(&self, value: &Value) -> Result<MerkleProof> {
-        self.mt.prove_nonexistence(key)
+        self.mt.prove_nonexistence(value)
     }
     pub fn verify(root: Hash, proof: &MerkleProof, value: &Value) -> Result<()> {
-        MerkleTree::verify(root, proof, value, EMPTY)
+        MerkleTree::verify(root, proof, value, &EMPTY)
     }
     pub fn verify_nonexistence(root: Hash, proof: &MerkleProof, value: &Value) -> Result<()> {
-        MerkleTree::verify_nonexistence(root, proof, key)
+        MerkleTree::verify_nonexistence(root, proof, value)
     }
     pub fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
         self.mt.iter()
@@ -108,7 +108,7 @@ impl Set {
 
 impl PartialEq for Set {
     fn eq(&self, other: &Self) -> bool {
-        self.mt.root() == other.mt.root() && self.mt.root() == other.mt.root()
+        self.mt.root() == other.mt.root()
     }
 }
 impl Eq for Set {}
@@ -153,7 +153,7 @@ impl Array {
 
 impl PartialEq for Array {
     fn eq(&self, other: &Self) -> bool {
-        self.mt.root() == other.mt.root() && self.mt.root() == other.mt.root()
+        self.mt.root() == other.mt.root()
     }
 }
 impl Eq for Array {}
