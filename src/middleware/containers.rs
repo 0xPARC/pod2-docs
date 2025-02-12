@@ -86,19 +86,19 @@ impl Set {
     pub fn commitment(&self) -> Hash {
         self.mt.root()
     }
-    pub fn contains(&self, key: &Value) -> bool {
+    pub fn contains(&self, value: &Value) -> bool {
         self.mt.contains(key)
     }
-    pub fn prove(&self, key: &Value) -> Result<MerkleProof> {
+    pub fn prove(&self, value: &Value) -> Result<MerkleProof> {
         self.mt.prove(key)
     }
-    pub fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
+    pub fn prove_nonexistence(&self, value: &Value) -> Result<MerkleProof> {
         self.mt.prove_nonexistence(key)
     }
-    pub fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
-        MerkleTree::verify(root, proof, key, value)
+    pub fn verify(root: Hash, proof: &MerkleProof, value: &Value) -> Result<()> {
+        MerkleTree::verify(root, proof, value, EMPTY)
     }
-    pub fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()> {
+    pub fn verify_nonexistence(root: Hash, proof: &MerkleProof, value: &Value) -> Result<()> {
         MerkleTree::verify_nonexistence(root, proof, key)
     }
     pub fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
