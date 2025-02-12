@@ -144,31 +144,28 @@ For the current use cases, we don't need to prove that the key exists but the va
 ## Interface
 
 ```rust
-impl MerkleTree {
-    /// builds a new `MerkleTree` where the leaves contain the given key-values
-    fn new(kvs: HashMap<Value, Value>) -> Self;
-    
+trait MerkleTreeTrait {
     /// returns the root of the tree
     fn root(&self) -> Hash;
-    
+
     /// returns the value at the given key
-    pub fn get(&self, key: &Value) -> Value;
-    
+    fn get(&self, key: &Value) -> Result<Value>;
+
     /// returns a proof of existence, which proves that the given key exists in
     /// the tree. It returns the `MerkleProof`.
     fn prove(&self, key: &Value) -> Result<MerkleProof>;
-    
+
     /// returns a proof of non-existence, which proves that the given `key`
     /// does not exist in the tree
     fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof>;
-    
+
     /// verifies an inclusion proof for the given `key` and `value`
     fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()>;
-    
+
     /// verifies a non-inclusion proof for the given `key`, that is, the given
     /// `key` does not exist in the tree
     fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()>;
-    
+
     /// returns an iterator over the leaves of the tree
     fn iter(&self) -> std::collections::hash_map::Iter<Value, Value>;
 }

@@ -2,7 +2,7 @@ use crate::middleware::{
     containers::{Container, Dictionary},
     hash_str, Hash, Params, PodId, PodSigner, PodType, SignedPod, Value, KEY_SIGNER, KEY_TYPE,
 };
-use crate::primitives::merkletree::MerkleTree;
+use crate::primitives::merkletree::{MerkleTree, MerkleTreeTrait};
 use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ impl PodSigner for MockSigner {
         kvs.insert(hash_str(&KEY_TYPE), Value::from(PodType::MockSigned));
 
         let dict = Dictionary::new(&kvs);
-        let id = PodId(dict.cm());
+        let id = PodId(dict.root());
         let signature = format!("{}_signed_by_{}", id, pk_hash);
         Ok(Box::new(MockSignedPod {
             dict,
@@ -39,7 +39,7 @@ pub struct MockSignedPod {
 impl SignedPod for MockSignedPod {
     fn verify(&self) -> bool {
         // Verify type
-        let value_at_type = match self.dict.mt.get(&hash_str(&KEY_TYPE).into()) {
+        let value_at_type = match self.dict.get(&hash_str(&KEY_TYPE).into()) {
             Ok(v) => v,
             Err(_) => return false,
         };
@@ -48,14 +48,20 @@ impl SignedPod for MockSignedPod {
         }
 
         // Verify id
-        let mt = MerkleTree::new(&self.dict.mt.kvs);
+        let mt = MerkleTree::build(
+            &self
+                .dict
+                .iter()
+                .map(|(&k, &v)| (k, v))
+                .collect::<HashMap<Value, Value>>(),
+        );
         let id = PodId(mt.root());
         if id != self.id {
             return false;
         }
 
         // Verify signature
-        let pk_hash = match self.dict.mt.get(&hash_str(&KEY_SIGNER).into()) {
+        let pk_hash = match self.dict.get(&hash_str(&KEY_SIGNER).into()) {
             Ok(v) => v,
             Err(_) => return false,
         };
@@ -73,7 +79,6 @@ impl SignedPod for MockSignedPod {
 
     fn kvs(&self) -> HashMap<Hash, Value> {
         self.dict
-            .mt
             .into_iter()
             .map(|(&k, &v)| (Hash(k.0), v))
             .collect()
@@ -122,7 +127,7 @@ pub mod tests {
             .into_iter()
             .map(|(k, v)| (Value(k.0), v))
             .collect::<HashMap<Value, Value>>();
-        let bad_mt = MerkleTree::new(&bad_kvs_mt);
+        let bad_mt = MerkleTree::build(&bad_kvs_mt);
         bad_pod.dict.mt = bad_mt;
         assert_eq!(bad_pod.verify(), false);
 
@@ -133,7 +138,7 @@ pub mod tests {
             .into_iter()
             .map(|(k, v)| (Value(k.0), v))
             .collect::<HashMap<Value, Value>>();
-        let bad_mt = MerkleTree::new(&bad_kvs_mt);
+        let bad_mt = MerkleTree::build(&bad_kvs_mt);
         bad_pod.dict.mt = bad_mt;
         assert_eq!(bad_pod.verify(), false);
     }
