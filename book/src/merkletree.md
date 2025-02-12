@@ -94,6 +94,15 @@ root = hash((L_root, R_root, 2)).
 The full `Dictionary` is then represented in the backend as `root` (four field elements in the Plonky2 backend).
 
 ### Example 2
+So for example, imagine we have 8 key-pairs, where the keys are just an enumeration from 0 to 7, then the tree leaves positions would look like:
+![](img/merkletree-example-1-a.png)
+
+Now let's change the key of the leaf `key=1`, and set it as `key=13`. Then, their respective leaf paths will be the same until they diverge in the 4-th bit:
+
+![](img/merkletree-example-1-b.png)
+
+
+### Example 3
 
 Suppose we have 4 key-values, where the first four bits of the hashes of the keys are `0000`, `0100`, `1010` and `1011`. The tree would look like:
 ![](img/merkletree-example-2-a.png)
@@ -136,28 +145,30 @@ For the current use cases, we don't need to prove that the key exists but the va
 
 ```rust
 impl MerkleTree {
-    /// builds a new `MerkleTree` where the leaves contain the given key-values
-    fn new(kvs: HashMap<Value, Value>) -> Self;
-    
     /// returns the root of the tree
-    fn root(&self) -> Result<Hash>;
+    fn root(&self) -> Hash;
+
+    /// returns the value at the given key
+    fn get(&self, key: &Value) -> Result<Value>;
     
+    /// returns a boolean indicating whether the key exists in the tree
+    fn contains(&self, key: &Value) -> bool;
+
     /// returns a proof of existence, which proves that the given key exists in
-    /// the tree. It returns the `value` of the leaf at the given `key`, and
-    /// the `MerkleProof`.
-    fn prove(&self, key: &Value) -> Result<(Value, MerkleProof)>;
-    
+    /// the tree. It returns the `MerkleProof`.
+    fn prove(&self, key: &Value) -> Result<MerkleProof>;
+
     /// returns a proof of non-existence, which proves that the given `key`
     /// does not exist in the tree
     fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof>;
-    
+
     /// verifies an inclusion proof for the given `key` and `value`
     fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()>;
-    
+
     /// verifies a non-inclusion proof for the given `key`, that is, the given
     /// `key` does not exist in the tree
     fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()>;
-    
+
     /// returns an iterator over the leaves of the tree
     fn iter(&self) -> std::collections::hash_map::Iter<Value, Value>;
 }

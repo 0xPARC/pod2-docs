@@ -1,13 +1,14 @@
 use crate::middleware::{
-    self, Hash, MainPod, MainPodInputs, NativeOperation, NativeStatement, NoneMainPod,
-    NoneSignedPod, Params, PodId, PodProver, SignedPod, Statement, StatementArg, ToFields,
+    self, hash_str, AnchoredKey, Hash, MainPod, MainPodInputs, NativeOperation, NativeStatement,
+    NoneMainPod, NoneSignedPod, Params, PodId, PodProver, SignedPod, Statement, StatementArg,
+    ToFields, KEY_TYPE, SELF,
 };
 use anyhow::Result;
 use itertools::Itertools;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::Hasher;
 use std::any::Any;
-use std::io::{self, Write};
+use std::fmt;
 
 pub struct MockProver {}
 
@@ -32,6 +33,40 @@ impl OperationArg {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
+impl Operation {
+    pub fn deref(&self, statements: &[Statement]) -> crate::middleware::Operation {
+        let deref_args = self
+            .1
+            .iter()
+            .map(|arg| match arg {
+                OperationArg::None => middleware::OperationArg::None,
+                OperationArg::Index(i) => {
+                    middleware::OperationArg::Statement(statements[*i].clone())
+                }
+            })
+            .collect();
+        middleware::Operation(self.0, deref_args)
+    }
+}
+
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} ", self.0)?;
+        for (i, arg) in self.1.iter().enumerate() {
+            if !(!f.alternate() && arg.is_none()) {
+                if i != 0 {
+                    write!(f, " ")?;
+                }
+                match arg {
+                    OperationArg::None => write!(f, "none")?,
+                    OperationArg::Index(i) => write!(f, "{:02}", i)?,
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MockMainPod {
     params: Params,
@@ -44,6 +79,73 @@ pub struct MockMainPod {
     operations: Vec<Operation>,
     // All statements (inherited + new)
     statements: Vec<Statement>,
+}
+
+impl fmt::Display for MockMainPod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "MockMainPod ({}):", self.id)?;
+        // TODO print input signed pods id and type
+        // TODO print input main pods id and type
+        let offset_input_main_pods = self.offset_input_main_pods();
+        let offset_input_statements = self.offset_input_statements();
+        let offset_public_statements = self.offset_public_statements();
+        for (i, st) in self.statements.iter().enumerate() {
+            if (i < self.offset_input_main_pods()) && (i % self.params.max_signed_pod_values == 0) {
+                writeln!(
+                    f,
+                    "  from input SignedPod {}:",
+                    i / self.params.max_signed_pod_values
+                )?;
+            }
+            if (i >= offset_input_main_pods)
+                && (i < offset_input_statements)
+                && (i % self.params.max_public_statements == 0)
+            {
+                writeln!(
+                    f,
+                    "  from input MainPod {}:",
+                    (i - offset_input_main_pods) / self.params.max_signed_pod_values
+                )?;
+            }
+            if i == offset_input_statements {
+                writeln!(f, "  private statements:")?;
+            }
+            if i == offset_public_statements {
+                writeln!(f, "  public statements:")?;
+            }
+
+            let op = (i >= offset_input_statements)
+                .then(|| &self.operations[i - offset_input_statements]);
+            fmt_statement_index(f, &st, op, i)?;
+        }
+        Ok(())
+    }
+}
+
+fn fmt_statement_index(
+    f: &mut fmt::Formatter,
+    st: &Statement,
+    op: Option<&Operation>,
+    index: usize,
+) -> fmt::Result {
+    if !(!f.alternate() && st.is_none()) {
+        write!(f, "    {:03}. ", index)?;
+        if f.alternate() {
+            write!(f, "{:#}", &st)?;
+        } else {
+            write!(f, "{}", &st)?;
+        }
+        if let Some(op) = op {
+            write!(f, " <- ")?;
+            if f.alternate() {
+                write!(f, "{:#}", op)?;
+            } else {
+                write!(f, "{}", op)?;
+            }
+        }
+        write!(f, "\n")?;
+    }
+    Ok(())
 }
 
 fn fill_pad<T: Clone>(v: &mut Vec<T>, pad_value: T, len: usize) {
@@ -120,8 +222,12 @@ impl MockMainPod {
         }
 
         // Public statements
-        assert!(inputs.public_statements.len() <= params.max_public_statements);
-        for i in 0..params.max_public_statements {
+        assert!(inputs.public_statements.len() < params.max_public_statements);
+        statements.push(Statement(
+            NativeStatement::ValueOf,
+            vec![StatementArg::Key(AnchoredKey(SELF, hash_str(KEY_TYPE)))],
+        ));
+        for i in 0..(params.max_public_statements - 1) {
             let mut st = inputs.public_statements.get(i).unwrap_or(&st_none).clone();
             Self::pad_statement_args(params, &mut st.1);
             statements.push(st);
@@ -189,8 +295,9 @@ impl MockMainPod {
         let op_none = Self::operation_none(params);
 
         let offset_public_statements = statements.len() - params.max_public_statements;
-        for i in 0..params.max_public_statements {
-            let st = &statements[offset_public_statements + i];
+        operations.push(Operation(NativeOperation::NewEntry, vec![]));
+        for i in 0..(params.max_public_statements - 1) {
+            let st = &statements[offset_public_statements + i + 1];
             let mut op = if st.is_none() {
                 Operation(NativeOperation::None, vec![])
             } else {
@@ -225,7 +332,8 @@ impl MockMainPod {
             .collect_vec();
         let input_main_pods = inputs.main_pods.iter().map(|p| (*p).clone()).collect_vec();
         let input_statements = inputs.statements.iter().cloned().collect_vec();
-        let public_statements = inputs.public_statements.iter().cloned().collect_vec();
+        let public_statements =
+            statements[statements.len() - params.max_public_statements..].to_vec();
 
         // get the id out of the public statements
         let id: PodId = PodId(hash_statements(&public_statements)?);
@@ -277,26 +385,94 @@ pub fn hash_statements(statements: &[middleware::Statement]) -> Result<middlewar
 
 impl MainPod for MockMainPod {
     fn verify(&self) -> bool {
-        // TODO
-        // - define input_statements as `statements.[self.offset_input_statements()..]`
-        // - Calculate the id from a subset of the statements.  Check it's equal to self.id
-        // - Find a ValueOf statement from the public statements with key=KEY_TYPE and check that
-        // the value is PodType::MockMainPod
-        // - Check that all `input_statements` of type `ValueOf` with origin=SELF have unique keys
+        let input_statement_offset = self.offset_input_statements();
+        // get the input_statements from the self.statements
+        let input_statements = &self.statements[input_statement_offset..];
+        // get the id out of the public statements, and ensure it is equal to self.id
+        let ids_match = self.id == PodId(hash_statements(&self.public_statements).unwrap());
+        // find a ValueOf statement from the public statements with key=KEY_TYPE and check that the
+        // value is PodType::MockMainPod
+        let has_type_statement = self
+            .public_statements
+            .iter()
+            .find(|s| {
+                s.0 == NativeStatement::ValueOf
+                    && s.1.len() > 0
+                    && if let StatementArg::Key(AnchoredKey(pod_id, key_hash)) = s.1[0] {
+                        pod_id == SELF && key_hash == hash_str(KEY_TYPE)
+                    } else {
+                        false
+                    }
+            })
+            .is_some();
+        // check that all `input_statements` of type `ValueOf` with origin=SELF have unique keys
         // (no duplicates)
-        // - Verify that all `input_statements` are correctly generated
+        // TODO: Instead of doing this, do a uniqueness check when verifying the output of a
+        // `NewValue` operation.
+        let value_ofs_unique = {
+            let key_id_pairs = input_statements
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    (
+                        // Separate private from public statements.
+                        if i < self.params.max_priv_statements() {
+                            0
+                        } else {
+                            1
+                        },
+                        s,
+                    )
+                })
+                .filter(|(i, s)| s.0 == NativeStatement::ValueOf)
+                .flat_map(|(i, s)| {
+                    if let StatementArg::Key(ak) = &s.1[0] {
+                        vec![(i, ak.1, ak.0)]
+                    } else {
+                        vec![]
+                    }
+                })
+                .collect::<Vec<_>>();
+            !(0..key_id_pairs.len() - 1).any(|i| key_id_pairs[i + 1..].contains(&key_id_pairs[i]))
+        };
+        // verify that all `input_statements` are correctly generated
         // by `self.operations` (where each operation can only access previous statements)
-        todo!()
+        let statement_check = input_statements
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                self.operations[i]
+                    .deref(&self.statements[..input_statement_offset + i])
+                    .check(s.clone())
+            })
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        ids_match && has_type_statement && value_ofs_unique & statement_check.into_iter().all(|b| b)
     }
     fn id(&self) -> PodId {
         self.id
     }
     fn pub_statements(&self) -> Vec<Statement> {
-        // TODO: All arguments that use origin=SELF need to be replaced by origin=self.id()
+        // return the public statements, where when origin=SELF is replaced by origin=self.id()
         self.statements
             .iter()
             .skip(self.offset_public_statements())
             .cloned()
+            .map(|statement| {
+                Statement(
+                    statement.0.clone(),
+                    statement
+                        .1
+                        .iter()
+                        .map(|sa| match &sa {
+                            StatementArg::Key(AnchoredKey(pod_id, h)) if *pod_id == SELF => {
+                                StatementArg::Key(AnchoredKey(self.id(), *h))
+                            }
+                            _ => sa.clone(),
+                        })
+                        .collect(),
+                )
+            })
             .collect()
     }
 
@@ -305,122 +481,18 @@ impl MainPod for MockMainPod {
     }
 }
 
-/// Useful for debugging
-pub struct Printer {
-    pub skip_none: bool,
-}
-
-impl Printer {
-    fn fmt_arg(&self, w: &mut dyn Write, arg: &StatementArg) -> io::Result<()> {
-        match arg {
-            StatementArg::None => write!(w, "none"),
-            StatementArg::Literal(v) => write!(w, "{}", v),
-            StatementArg::Key(r) => write!(w, "{}.{}", r.0, r.1),
-        }
-    }
-
-    fn fmt_statement(&self, w: &mut dyn Write, st: &Statement) -> io::Result<()> {
-        write!(w, "{:?} ", st.0)?;
-        for (i, arg) in st.1.iter().enumerate() {
-            if !(self.skip_none && arg.is_none()) {
-                if i != 0 {
-                    write!(w, " ")?;
-                }
-                self.fmt_arg(w, arg)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn fmt_operation(&self, w: &mut dyn Write, op: &Operation) -> io::Result<()> {
-        write!(w, "{:?} ", op.0)?;
-        for (i, arg) in op.1.iter().enumerate() {
-            if !(self.skip_none && arg.is_none()) {
-                if i != 0 {
-                    write!(w, " ")?;
-                }
-                match arg {
-                    OperationArg::None => write!(w, "none")?,
-                    OperationArg::Index(i) => write!(w, "{:02}", i)?,
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn fmt_statement_index(
-        &self,
-        w: &mut dyn Write,
-        st: &Statement,
-        op: Option<&Operation>,
-        index: usize,
-    ) -> io::Result<()> {
-        if !(self.skip_none && st.is_none()) {
-            write!(w, "    {:03}. ", index)?;
-            self.fmt_statement(w, &st)?;
-            if let Some(op) = op {
-                write!(w, " <- ")?;
-                self.fmt_operation(w, op)?;
-            }
-            write!(w, "\n")?;
-        }
-        Ok(())
-    }
-
-    pub fn fmt_mock_main_pod(&self, w: &mut dyn Write, pod: &MockMainPod) -> io::Result<()> {
-        writeln!(w, "MockMainPod ({}):", pod.id)?;
-        // TODO print input signed pods id and type
-        // TODO print input main pods id and type
-        let offset_input_main_pods = pod.offset_input_main_pods();
-        let offset_input_statements = pod.offset_input_statements();
-        let offset_public_statements = pod.offset_public_statements();
-        for (i, st) in pod.statements.iter().enumerate() {
-            if (i < pod.offset_input_main_pods()) && (i % pod.params.max_signed_pod_values == 0) {
-                writeln!(
-                    w,
-                    "  from input SignedPod {}:",
-                    i / pod.params.max_signed_pod_values
-                )?;
-            }
-            if (i >= offset_input_main_pods)
-                && (i < offset_input_statements)
-                && (i % pod.params.max_public_statements == 0)
-            {
-                writeln!(
-                    w,
-                    "  from input MainPod {}:",
-                    (i - offset_input_main_pods) / pod.params.max_signed_pod_values
-                )?;
-            }
-            if i == offset_input_statements {
-                writeln!(w, "  private statements:")?;
-            }
-            if i == offset_public_statements {
-                writeln!(w, "  public statements:")?;
-            }
-
-            let op = (i >= offset_input_statements)
-                .then(|| &pod.operations[i - offset_input_statements]);
-            if !(self.skip_none && st.is_none()) {
-                self.fmt_statement_index(w, &st, op, i)?;
-            }
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use crate::frontend;
+    use crate::examples::{great_boy_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
     use crate::middleware;
 
     #[test]
-    fn test_mock_main_0() {
+    fn test_mock_main_zu_kyc() {
         let params = middleware::Params::default();
 
-        let (gov_id_builder, pay_stub_builder) = frontend::tests::zu_kyc_sign_pod_builders(&params);
+        let (gov_id_builder, pay_stub_builder) = zu_kyc_sign_pod_builders(&params);
         let mut signer = MockSigner {
             pk: "ZooGov".into(),
         };
@@ -429,18 +501,33 @@ pub mod tests {
             pk: "ZooDeel".into(),
         };
         let pay_stub_pod = pay_stub_builder.sign(&mut signer).unwrap();
-        let kyc_builder = frontend::tests::zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod);
+        let kyc_builder = zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod);
 
         let mut prover = MockProver {};
         let kyc_pod = kyc_builder.prove(&mut prover).unwrap();
         let pod = kyc_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
 
-        let printer = Printer { skip_none: false };
-        let mut w = io::stdout();
-        printer.fmt_mock_main_pod(&mut w, &pod).unwrap();
+        println!("{:#}", pod);
 
-        // assert_eq!(pod.verify(), true); // TODO
-        // println!("id: {}", pod.id());
-        // println!("kvs: {:?}", pod.pub_statements());
+        assert_eq!(pod.verify(), true); // TODO
+                                        // println!("id: {}", pod.id());
+                                        // println!("pub_statements: {:?}", pod.pub_statements());
+    }
+
+    #[test]
+    fn test_mock_main_great_boy() {
+        let great_boy_builder = great_boy_pod_full_flow();
+
+        let mut prover = MockProver {};
+        let great_boy_pod = great_boy_builder.prove(&mut prover).unwrap();
+        let pod = great_boy_pod
+            .pod
+            .into_any()
+            .downcast::<MockMainPod>()
+            .unwrap();
+
+        println!("{}", pod);
+
+        assert_eq!(pod.verify(), true);
     }
 }
