@@ -155,8 +155,7 @@ impl MerkleTree {
     pub fn get(&self, key: &Value) -> Value;
     
     /// returns a proof of existence, which proves that the given key exists in
-    /// the tree. It returns the `value` of the leaf at the given `key`, and
-    /// the `MerkleProof`.
+    /// the tree. It returns the `MerkleProof`.
     fn prove(&self, key: &Value) -> Result<MerkleProof>;
     
     /// returns a proof of non-existence, which proves that the given `key`

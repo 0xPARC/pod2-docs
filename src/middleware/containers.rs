@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use super::{Hash, Value, EMPTY};
 use crate::primitives::merkletree::MerkleTree;
 
-/// Contaiter is a wrapper of a MerkleTree, used to achieve Dictionary, Set, Array frontend types.
+/// Container is a wrapper of a MerkleTree, used to achieve Dictionary, Set, Array frontend types.
 pub trait Container {
     type Raw: Clone;
 
