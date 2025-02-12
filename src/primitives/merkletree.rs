@@ -20,38 +20,8 @@ use crate::middleware::{Hash, Value, C, D, F};
 
 const CAP_HEIGHT: usize = 0;
 
-/// Defines the MerkleTree trait. Notice it does not have defined a method to build a new tree.
-/// This is done at the wrapper level, where each wrapper constructs the MerkleTree from different
-/// types.
-pub trait MerkleTreeTrait {
-    /// returns the root of the tree
-    fn root(&self) -> Hash;
-
-    /// returns the value at the given key
-    fn get(&self, key: &Value) -> Result<Value>;
-
-    /// returns a proof of existence, which proves that the given key exists in
-    /// the tree. It returns the `MerkleProof`.
-    fn prove(&self, key: &Value) -> Result<MerkleProof>;
-
-    /// returns a proof of non-existence, which proves that the given `key`
-    /// does not exist in the tree
-    fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof>;
-
-    /// verifies an inclusion proof for the given `key` and `value`
-    fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()>;
-
-    /// verifies a non-inclusion proof for the given `key`, that is, the given
-    /// `key` does not exist in the tree
-    fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()>;
-
-    /// returns an iterator over the leaves of the tree
-    fn iter(&self) -> std::collections::hash_map::Iter<Value, Value>;
-}
-
-/// MerkleTree currently implements the MerkleTreeTrait with a wrapper on top of Plonky2's
-/// MerkleTree. A future iteration will replace it by the MerkleTree specified at
-/// https://0xparc.github.io/pod2/merkletree.html .
+/// MerkleTree currently is a wrapper on top of Plonky2's MerkleTree. A future iteration will
+/// replace it by the MerkleTree specified at https://0xparc.github.io/pod2/merkletree.html .
 #[derive(Clone, Debug)]
 pub struct MerkleTree {
     tree: PlonkyMerkleTree<F, <C as GenericConfig<D>>::Hasher>,
@@ -75,10 +45,8 @@ pub struct MerkleProof {
 }
 
 impl MerkleTree {
-    /// builds a new `MerkleTree` where the leaves contain the given key-values. Notice that the
-    /// method is called `build` to not collision with `new`, used at the wrapper-types of
-    /// MerkleTree (ie. Container).
-    pub fn build(kvs: &HashMap<Value, Value>) -> Self {
+    /// builds a new `MerkleTree` where the leaves contain the given key-values
+    pub fn new(kvs: &HashMap<Value, Value>) -> Self {
         let mut keyindex: HashMap<Value, usize> = HashMap::new();
         let mut leaves: Vec<Vec<F>> = Vec::new();
         let mut leaves_map: HashMap<Hash, (Value, Value)> = HashMap::new();
@@ -110,15 +78,17 @@ impl MerkleTree {
     }
 }
 
-impl MerkleTreeTrait for MerkleTree {
-    fn root(&self) -> Hash {
+impl MerkleTree {
+    /// returns the root of the tree
+    pub fn root(&self) -> Hash {
         if self.tree.cap.is_empty() {
             return crate::middleware::NULL;
         }
         Hash(self.tree.cap.0[0].elements)
     }
 
-    fn get(&self, key: &Value) -> Result<Value> {
+    /// returns the value at the given key
+    pub fn get(&self, key: &Value) -> Result<Value> {
         let i = self.keyindex.get(&key).ok_or(anyhow!("key not in tree"))?;
         let leaf_hash_raw = self.tree.get(*i);
         let leaf_hash_f: [F; 4] = leaf_hash_raw
@@ -129,7 +99,14 @@ impl MerkleTreeTrait for MerkleTree {
         Ok(*value)
     }
 
-    fn prove(&self, key: &Value) -> Result<MerkleProof> {
+    /// returns a boolean indicating whether the key exists in the tree
+    pub fn contains(&self, key: &Value) -> bool {
+        self.keyindex.get(&key).is_some()
+    }
+
+    /// returns a proof of existence, which proves that the given key exists in
+    /// the tree. It returns the `MerkleProof`.
+    pub fn prove(&self, key: &Value) -> Result<MerkleProof> {
         let i = self.keyindex.get(&key).ok_or(anyhow!("key not in tree"))?;
         let proof = self.tree.prove(*i);
         Ok(MerkleProof {
@@ -139,7 +116,9 @@ impl MerkleTreeTrait for MerkleTree {
         })
     }
 
-    fn prove_nonexistence(&self, _key: &Value) -> Result<MerkleProof> {
+    /// returns a proof of non-existence, which proves that the given `key`
+    /// does not exist in the tree
+    pub fn prove_nonexistence(&self, _key: &Value) -> Result<MerkleProof> {
         // mock method
         println!("WARNING: MerkleTree::verify_nonexistence is currently a mock");
         Ok(MerkleProof {
@@ -149,7 +128,8 @@ impl MerkleTreeTrait for MerkleTree {
         })
     }
 
-    fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
+    /// verifies an inclusion proof for the given `key` and `value`
+    pub fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
         if !proof.existence {
             return Err(anyhow!(
                 "expected proof of existence, found proof of non-existence"
@@ -160,7 +140,9 @@ impl MerkleTreeTrait for MerkleTree {
         verify_merkle_proof(leaf.into(), proof.index, root, &proof.proof)
     }
 
-    fn verify_nonexistence(_root: Hash, proof: &MerkleProof, _key: &Value) -> Result<()> {
+    /// verifies a non-inclusion proof for the given `key`, that is, the given
+    /// `key` does not exist in the tree
+    pub fn verify_nonexistence(_root: Hash, proof: &MerkleProof, _key: &Value) -> Result<()> {
         // mock method
         if proof.existence {
             return Err(anyhow!(
@@ -171,7 +153,8 @@ impl MerkleTreeTrait for MerkleTree {
         Ok(())
     }
 
-    fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
+    /// returns an iterator over the leaves of the tree
+    pub fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
         self.kvs.iter()
     }
 }
@@ -211,7 +194,7 @@ pub mod tests {
         kvs.insert(k1, v1);
         kvs.insert(k2, v2);
 
-        let tree = MerkleTree::build(&kvs);
+        let tree = MerkleTree::new(&kvs);
 
         let proof = tree.prove(&k2)?;
         MerkleTree::verify(tree.root(), &proof, &k2, &v2)?;

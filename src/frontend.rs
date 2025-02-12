@@ -13,7 +13,6 @@ use crate::middleware::{
     hash_str, Hash, MainPodInputs, NativeOperation, NativeStatement, Params, PodId, PodProver,
     PodSigner, SELF,
 };
-use crate::primitives::merkletree::MerkleTreeTrait;
 
 /// This type is just for presentation purposes.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
@@ -53,9 +52,9 @@ impl From<&Value> for middleware::Value {
         match v {
             Value::String(s) => middleware::Value(hash_str(s).0),
             Value::Int(v) => middleware::Value::from(*v),
-            Value::Dictionary(d) => middleware::Value(d.root().0),
-            Value::Set(s) => middleware::Value(s.root().0),
-            Value::Array(a) => middleware::Value(a.root().0),
+            Value::Dictionary(d) => middleware::Value(d.commitment().0),
+            Value::Set(s) => middleware::Value(s.commitment().0),
+            Value::Array(a) => middleware::Value(a.commitment().0),
         }
     }
 }
@@ -65,9 +64,9 @@ impl fmt::Display for Value {
         match self {
             Value::String(s) => write!(f, "\"{}\"", s),
             Value::Int(v) => write!(f, "{}", v),
-            Value::Dictionary(d) => write!(f, "dict:{}", d.root()),
-            Value::Set(s) => write!(f, "set:{}", s.root()),
-            Value::Array(a) => write!(f, "arr:{}", a.root()),
+            Value::Dictionary(d) => write!(f, "dict:{}", d.commitment()),
+            Value::Set(s) => write!(f, "set:{}", s.commitment()),
+            Value::Array(a) => write!(f, "arr:{}", a.commitment()),
         }
     }
 }

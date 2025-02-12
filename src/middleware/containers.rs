@@ -6,18 +6,7 @@ use plonky2::plonk::config::Hasher;
 use std::collections::HashMap;
 
 use super::{Hash, Value, EMPTY};
-use crate::primitives::merkletree::{MerkleProof, MerkleTree, MerkleTreeTrait};
-
-/// Container is a wrapper of a MerkleTree, used to achieve Dictionary, Set, Array frontend types.
-/// It offers all the methods of the trait `MerkleTreeTrait`, with an additional constructor `new`
-/// that allows each specific type (ie. Dictionary, Set, Array) to define how each type is
-/// constructed (for example a Dictionary is built from HashMap<Hash,Value>, whereas a set is built
-/// from Vec<Value>).
-pub trait Container: MerkleTreeTrait {
-    type Raw: Clone;
-
-    fn new(raw: &Self::Raw) -> Self;
-}
+use crate::primitives::merkletree::{MerkleProof, MerkleTree};
 
 /// Dictionary: the user original keys and values are hashed to be used in the leaf.
 ///    leaf.key=hash(original_key)
@@ -28,37 +17,32 @@ pub struct Dictionary {
     pub(crate) mt: MerkleTree,
 }
 
-impl Container for Dictionary {
-    type Raw = HashMap<Hash, Value>;
-
-    fn new(raw: &Self::Raw) -> Self {
-        let kvs: HashMap<Value, Value> = raw.into_iter().map(|(&k, &v)| (Value(k.0), v)).collect();
+impl Dictionary {
+    pub fn new(kvs: &HashMap<Hash, Value>) -> Self {
+        let kvs: HashMap<Value, Value> = kvs.into_iter().map(|(&k, &v)| (Value(k.0), v)).collect();
         Self {
-            mt: MerkleTree::build(&kvs),
+            mt: MerkleTree::new(&kvs),
         }
     }
-}
-
-impl MerkleTreeTrait for Dictionary {
-    fn root(&self) -> Hash {
+    pub fn commitment(&self) -> Hash {
         self.mt.root()
     }
-    fn get(&self, key: &Value) -> Result<Value> {
+    pub fn get(&self, key: &Value) -> Result<Value> {
         self.mt.get(key)
     }
-    fn prove(&self, key: &Value) -> Result<MerkleProof> {
+    pub fn prove(&self, key: &Value) -> Result<MerkleProof> {
         self.mt.prove(key)
     }
-    fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
+    pub fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
         self.mt.prove_nonexistence(key)
     }
-    fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
+    pub fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
         MerkleTree::verify(root, proof, key, value)
     }
-    fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()> {
+    pub fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()> {
         MerkleTree::verify_nonexistence(root, proof, key)
     }
-    fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
         self.mt.iter()
     }
 }
@@ -86,11 +70,9 @@ pub struct Set {
     mt: MerkleTree,
 }
 
-impl Container for Set {
-    type Raw = Vec<Value>;
-
-    fn new(raw: &Self::Raw) -> Self {
-        let kvs: HashMap<Value, Value> = raw
+impl Set {
+    pub fn new(set: &Vec<Value>) -> Self {
+        let kvs: HashMap<Value, Value> = set
             .into_iter()
             .map(|e| {
                 let h = PoseidonHash::hash_no_pad(&e.0).elements;
@@ -98,31 +80,28 @@ impl Container for Set {
             })
             .collect();
         Self {
-            mt: MerkleTree::build(&kvs),
+            mt: MerkleTree::new(&kvs),
         }
     }
-}
-
-impl MerkleTreeTrait for Set {
-    fn root(&self) -> Hash {
+    pub fn commitment(&self) -> Hash {
         self.mt.root()
     }
-    fn get(&self, key: &Value) -> Result<Value> {
-        self.mt.get(key)
+    pub fn contains(&self, key: &Value) -> bool {
+        self.mt.contains(key)
     }
-    fn prove(&self, key: &Value) -> Result<MerkleProof> {
+    pub fn prove(&self, key: &Value) -> Result<MerkleProof> {
         self.mt.prove(key)
     }
-    fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
+    pub fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
         self.mt.prove_nonexistence(key)
     }
-    fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
+    pub fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
         MerkleTree::verify(root, proof, key, value)
     }
-    fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()> {
+    pub fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()> {
         MerkleTree::verify_nonexistence(root, proof, key)
     }
-    fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
         self.mt.iter()
     }
 }
@@ -143,42 +122,31 @@ pub struct Array {
     mt: MerkleTree,
 }
 
-impl Container for Array {
-    type Raw = Vec<Value>;
-
-    fn new(raw: &Self::Raw) -> Self {
-        let kvs: HashMap<Value, Value> = raw
+impl Array {
+    pub fn new(array: &Vec<Value>) -> Self {
+        let kvs: HashMap<Value, Value> = array
             .into_iter()
             .enumerate()
             .map(|(i, &e)| (Value::from(i as i64), e))
             .collect();
 
         Self {
-            mt: MerkleTree::build(&kvs),
+            mt: MerkleTree::new(&kvs),
         }
     }
-}
-
-impl MerkleTreeTrait for Array {
-    fn root(&self) -> Hash {
+    pub fn commitment(&self) -> Hash {
         self.mt.root()
     }
-    fn get(&self, key: &Value) -> Result<Value> {
-        self.mt.get(key)
+    pub fn get(&self, i: usize) -> Result<Value> {
+        self.mt.get(&Value::from(i as i64))
     }
-    fn prove(&self, key: &Value) -> Result<MerkleProof> {
-        self.mt.prove(key)
+    pub fn prove(&self, i: usize) -> Result<MerkleProof> {
+        self.mt.prove(&Value::from(i as i64))
     }
-    fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
-        self.mt.prove_nonexistence(key)
+    pub fn verify(root: Hash, proof: &MerkleProof, i: usize, value: &Value) -> Result<()> {
+        MerkleTree::verify(root, proof, &Value::from(i as i64), value)
     }
-    fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
-        MerkleTree::verify(root, proof, key, value)
-    }
-    fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()> {
-        MerkleTree::verify_nonexistence(root, proof, key)
-    }
-    fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
         self.mt.iter()
     }
 }

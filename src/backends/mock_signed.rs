@@ -1,8 +1,8 @@
 use crate::middleware::{
-    containers::{Container, Dictionary},
-    hash_str, Hash, Params, PodId, PodSigner, PodType, SignedPod, Value, KEY_SIGNER, KEY_TYPE,
+    containers::Dictionary, hash_str, Hash, Params, PodId, PodSigner, PodType, SignedPod, Value,
+    KEY_SIGNER, KEY_TYPE,
 };
-use crate::primitives::merkletree::{MerkleTree, MerkleTreeTrait};
+use crate::primitives::merkletree::MerkleTree;
 use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ impl PodSigner for MockSigner {
         kvs.insert(hash_str(&KEY_TYPE), Value::from(PodType::MockSigned));
 
         let dict = Dictionary::new(&kvs);
-        let id = PodId(dict.root());
+        let id = PodId(dict.commitment());
         let signature = format!("{}_signed_by_{}", id, pk_hash);
         Ok(Box::new(MockSignedPod {
             dict,
@@ -48,7 +48,7 @@ impl SignedPod for MockSignedPod {
         }
 
         // Verify id
-        let mt = MerkleTree::build(
+        let mt = MerkleTree::new(
             &self
                 .dict
                 .iter()
@@ -127,7 +127,7 @@ pub mod tests {
             .into_iter()
             .map(|(k, v)| (Value(k.0), v))
             .collect::<HashMap<Value, Value>>();
-        let bad_mt = MerkleTree::build(&bad_kvs_mt);
+        let bad_mt = MerkleTree::new(&bad_kvs_mt);
         bad_pod.dict.mt = bad_mt;
         assert_eq!(bad_pod.verify(), false);
 
@@ -138,7 +138,7 @@ pub mod tests {
             .into_iter()
             .map(|(k, v)| (Value(k.0), v))
             .collect::<HashMap<Value, Value>>();
-        let bad_mt = MerkleTree::build(&bad_kvs_mt);
+        let bad_mt = MerkleTree::new(&bad_kvs_mt);
         bad_pod.dict.mt = bad_mt;
         assert_eq!(bad_pod.verify(), false);
     }

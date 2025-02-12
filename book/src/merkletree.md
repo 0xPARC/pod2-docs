@@ -144,12 +144,15 @@ For the current use cases, we don't need to prove that the key exists but the va
 ## Interface
 
 ```rust
-trait MerkleTreeTrait {
+impl MerkleTree {
     /// returns the root of the tree
     fn root(&self) -> Hash;
 
     /// returns the value at the given key
     fn get(&self, key: &Value) -> Result<Value>;
+    
+    /// returns a boolean indicating whether the key exists in the tree
+    fn contains(&self, key: &Value) -> bool;
 
     /// returns a proof of existence, which proves that the given key exists in
     /// the tree. It returns the `MerkleProof`.
