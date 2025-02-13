@@ -98,4 +98,28 @@ Equal(name_from_pod1, friend_from_pod2)
 
 ## How to inherit local variables from a previous POD
 
+In this design, an additional complication arises when you
+carry a value from one POD to another,
+and you want to keep track of the origin POD on which it originated.
 
+To allow this operation, we introduce an additional deduction rule
+```
+InheritValueFromPodKey,
+```
+which works as follows.
+
+Suppose "self" is the current POD and "parent_id" is the POD id of one of the input PODs to "self".
+
+Suppose "parent" has, among its public statements, the statement
+```
+ValueFromPodKey(parent_name, origin, original_name)
+```
+and "self" has the statement (public or private)
+```
+ValueFromPodKey(self_name, parent_id, parent_name).
+```
+
+Then ```InheritValueFromPodKey``` allows you to generate the following statement on "self":
+```
+ValueFromPodKey(self_name, origin, original_name).
+```
