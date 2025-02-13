@@ -29,4 +29,24 @@ In general, in the front-end language, the "arguments" to an operation define a 
 
 In order to apply the operation, the user who wants to create a POD must give acceptable values for all the arguments.  The POD prover will substitute those values for all the statements in the "Condition" and check that all substituted statements previously appear in the POD.  If this check passes, the output statement is then a valid statement.
 
+## What applying the operation looks like on the back end
+
+On the back end the "compiled example" deduction rule is converted to a sort of "template":
+
+| Args | Condition            | Output                      |
+|------------|-----------------------------------------|----|
+| *1 (pod), <br> *2 (good_boy_issuers_origin), <br> *3 (good_boy_issuers_key), <br> *4 (receiver_origin), <br> *5 (receiver_key) | ValueOf(AK(*1, "_type"), SIGNATURE), <br> Contains(AK(*2, *3), AK(*1,"_signer")), <br> Equals(AK(*1, "friend"), AK(*4, *5)) | GoodBoy(AK(*4, *5), AK(*2, *3)) |
+
+If you want to apply this deduction rule to prove a `GoodBoy` statement,
+you have to provide the following witnesses in-circuit.
+
+- Copy of the deduction rule
+- Values for *1, *2, *3, *4, *5.  (*1, *2, *4 should be OriginIDs for the three origins; *3 and *5 should be key names.)
+- Copy of the three statements in the deduction rule with *1, *2, *3, *4, *5 filled in
+- Indices of the three statements `ValueOf`, `Contains`, `Equals` in the list of previous statements.
+
+And the circuit will verify:
+- *1, *2, *3, *4, *5 were correctly substituted into the statements
+- The three statements `ValueOf`, `Contains`, `Equals` do indeed appear at the claimed indices.
+
 [^operation]: In previous versions of these docs, "operations" were called "deduction rules".
