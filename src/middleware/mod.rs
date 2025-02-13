@@ -48,6 +48,15 @@ pub type Entry = (String, Value);
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub struct Value(pub [F; 4]);
 
+impl Value {
+    pub fn to_bytes(self) -> Vec<u8> {
+        self.0
+            .iter()
+            .flat_map(|e| e.to_canonical_u64().to_le_bytes())
+            .collect()
+    }
+}
+
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
         for (lhs, rhs) in self.0.iter().zip(other.0.iter()).rev() {
