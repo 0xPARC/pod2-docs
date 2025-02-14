@@ -574,8 +574,10 @@ pub mod build_utils {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::backends::mock_main::{MockMainPod, MockProver};
     use crate::backends::mock_signed::MockSigner;
     use crate::examples::{great_boy_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
+    use crate::middleware::MainPod;
 
     #[test]
     fn test_front_zu_kyc() -> Result<()> {
@@ -599,7 +601,12 @@ pub mod tests {
         let kyc = zu_kyc_pod_builder(&params, &gov_id, &pay_stub);
         println!("{}", kyc);
 
-        // TODO: prove kyc with MockProver and print it
+        let mut prover = MockProver {};
+        let kyc_pod = kyc.prove(&mut prover).unwrap();
+        let pod = kyc_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
+
+        println!("{}", pod);
+        assert_eq!(pod.verify(), true); 
 
         Ok(())
     }
@@ -609,7 +616,12 @@ pub mod tests {
         let great_boy = great_boy_pod_full_flow();
         println!("{}", great_boy);
 
-        // TODO: prove kyc with MockProver and print it
+        let mut prover = MockProver {};
+        let great_boy_pod = great_boy.prove(&mut prover).unwrap();
+        let pod = great_boy_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
+
+        println!("{}", pod);
+        assert_eq!(pod.verify(), true);
 
         Ok(())
     }
