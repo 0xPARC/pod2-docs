@@ -1,5 +1,10 @@
 # Custom operations (or: how to define a custom predicate): VERSION 2
 
+# DO NOT USE THIS DOC
+# SAVING IN THE GITHUB JUST SO WE HAVE A COPY
+# WE ARE NOT USING THIS SPEC
+# DO NOT USE
+
 ## The local variable requirement
 
 This spec differs from the main spec in that there are no anchored keys.  However, there are still types `Origin` and `Key`.
