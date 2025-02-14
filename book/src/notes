@@ -1,3 +1,5 @@
+
+
 Ethdos(x, y, d) = OR ( EthdosBase(x, y, d), EthdosInd(x, y, d) )
 EthdosBase(x, y, d) = AND( Equals(x, y), IsZero(d) )
 IsZero(d) = AND( ... )
