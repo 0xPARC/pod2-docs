@@ -31,6 +31,12 @@ impl OperationArg {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum OperationArgError {
+    KeyNotFound,
+    StatementNotFound,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
 impl Operation {
@@ -236,11 +242,13 @@ impl MockMainPod {
         statements
     }
 
-    fn find_op_arg(statements: &[Statement], op_arg: &middleware::OperationArg) -> OperationArg {
+    pub fn find_op_arg(
+        statements: &[Statement],
+        op_arg: &middleware::OperationArg,
+    ) -> Result<OperationArg, OperationArgError> {
         match op_arg {
-            middleware::OperationArg::None => OperationArg::None,
-            middleware::OperationArg::Key(k) => OperationArg::Index(
-                // TODO: Error handling when the key is not found in any ValueOf statement
+            middleware::OperationArg::None => Ok(OperationArg::None),
+            middleware::OperationArg::Key(k) => {
                 statements
                     .iter()
                     .enumerate()
@@ -251,16 +259,17 @@ impl MockMainPod {
                         },
                         _ => None,
                     })
-                    .unwrap(),
-            ),
-            middleware::OperationArg::Statement(st) => OperationArg::Index(
-                // TODO: Error handling when the statement is not found
+                    .map(OperationArg::Index)
+                    .ok_or(OperationArgError::KeyNotFound)
+            }
+            middleware::OperationArg::Statement(st) => {
                 statements
                     .iter()
                     .enumerate()
                     .find_map(|(i, s)| (s == st).then_some(i))
-                    .unwrap(),
-            ),
+                    .map(OperationArg::Index)
+                    .ok_or(OperationArgError::StatementNotFound)
+            }
         }
     }
 
@@ -278,7 +287,7 @@ impl MockMainPod {
             Self::pad_operation_args(params, &mut mid_args);
             let mut args = Vec::with_capacity(mid_args.len());
             for mid_arg in &mid_args {
-                args.push(Self::find_op_arg(statements, mid_arg));
+                args.push(Self::find_op_arg(statements, mid_arg).expect("Failed to find operation argument"));
             }
             operations.push(Operation(op.0, args));
         }
@@ -292,8 +301,6 @@ impl MockMainPod {
         statements: &[Statement],
         mut operations: Vec<Operation>,
     ) -> Vec<Operation> {
-        let op_none = Self::operation_none(params);
-
         let offset_public_statements = statements.len() - params.max_public_statements;
         operations.push(Operation(NativeOperation::NewEntry, vec![]));
         for i in 0..(params.max_public_statements - 1) {
@@ -302,9 +309,10 @@ impl MockMainPod {
                 Operation(NativeOperation::None, vec![])
             } else {
                 let mid_arg = middleware::OperationArg::Statement(st.clone());
+                let op_arg = Self::find_op_arg(statements, &mid_arg).expect("Failed to find operation argument");
                 Operation(
                     NativeOperation::CopyStatement,
-                    vec![Self::find_op_arg(statements, &mid_arg)],
+                    vec![op_arg],
                 )
             };
             fill_pad(&mut op.1, OperationArg::None, params.max_operation_args);
