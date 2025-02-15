@@ -505,7 +505,7 @@ impl Pod for MockMainPod {
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use crate::examples::{great_boy_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
+    use crate::examples::{great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
     use crate::middleware;
 
     #[test]
@@ -549,5 +549,16 @@ pub mod tests {
         println!("{}", pod);
 
         assert_eq!(pod.verify(), true);
+    }
+
+    #[test]
+    fn test_mock_main_tickets() {
+        let tickets_builder = tickets_pod_full_flow();
+        let mut prover = MockProver {};
+        let proof_pod = tickets_builder.prove(&mut prover).unwrap();
+        let pod = proof_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
+
+        println!("{}", pod);
+        assert_eq!(pod.verify(), true); 
     }
 }

@@ -30,6 +30,7 @@ pub struct Origin(pub PodClass, pub PodId);
 pub enum Value {
     String(String),
     Int(i64),
+    Bool(bool),
     Dictionary(Dictionary),
     Set(Set),
     Array(Array),
@@ -47,11 +48,18 @@ impl From<i64> for Value {
     }
 }
 
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
 impl From<&Value> for middleware::Value {
     fn from(v: &Value) -> Self {
         match v {
             Value::String(s) => middleware::Value(hash_str(s).0),
             Value::Int(v) => middleware::Value::from(*v),
+            Value::Bool(b) => middleware::Value::from(*b as i64),
             Value::Dictionary(d) => middleware::Value(d.commitment().0),
             Value::Set(s) => middleware::Value(s.commitment().0),
             Value::Array(a) => middleware::Value(a.commitment().0),
@@ -64,6 +72,7 @@ impl fmt::Display for Value {
         match self {
             Value::String(s) => write!(f, "\"{}\"", s),
             Value::Int(v) => write!(f, "{}", v),
+            Value::Bool(b) => write!(f, "{}", b),
             Value::Dictionary(d) => write!(f, "dict:{}", d.commitment()),
             Value::Set(s) => write!(f, "set:{}", s.commitment()),
             Value::Array(a) => write!(f, "arr:{}", a.commitment()),
@@ -221,6 +230,12 @@ impl From<&str> for OperationArg {
 impl From<i64> for OperationArg {
     fn from(v: i64) -> Self {
         Self::Literal(Value::from(v))
+    }
+}
+
+impl From<bool> for OperationArg {
+    fn from(b: bool) -> Self {
+        Self::Literal(Value::from(b))
     }
 }
 
@@ -578,8 +593,9 @@ pub mod build_utils {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::backends::mock_main::MockProver;
     use crate::backends::mock_signed::MockSigner;
-    use crate::examples::{great_boy_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
+    use crate::examples::{great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
 
     #[test]
     fn test_front_zu_kyc() -> Result<()> {
@@ -614,6 +630,14 @@ pub mod tests {
         println!("{}", great_boy);
 
         // TODO: prove kyc with MockProver and print it
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_front_tickets() -> Result<()> {
+        let builder = tickets_pod_full_flow();
+        println!("{}", builder);
 
         Ok(())
     }

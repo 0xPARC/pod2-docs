@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::backends::mock_signed::MockSigner;
 use crate::frontend::{MainPodBuilder, SignedPod, SignedPodBuilder, Value};
 use crate::middleware::{containers::Dictionary, Params, PodType, KEY_SIGNER, KEY_TYPE};
 use crate::op;
@@ -130,8 +131,6 @@ pub fn great_boy_pod_builder(
 }
 
 pub fn great_boy_pod_full_flow() -> MainPodBuilder {
-    use crate::backends::mock_signed::MockSigner;
-
     let params = Params {
         max_input_signed_pods: 6,
         max_statements: 100,
@@ -193,4 +192,36 @@ pub fn great_boy_pod_full_flow() -> MainPodBuilder {
         &good_boy_issuers_dict,
         alice,
     )
+}
+
+// Tickets
+
+pub fn tickets_sign_pod_builder(params: &Params) -> SignedPodBuilder {
+    // Create a signed pod with all atomic types (string, int, bool)
+    let mut builder = SignedPodBuilder::new(params);
+    builder.insert("eventId", 123);
+    builder.insert("productId", 456);
+    builder.insert("attendeeName", "John Doe");
+    builder.insert("attendeeEmail", "john.doe@example.com");
+    builder.insert("isConsumed", true);
+    builder.insert("isRevoked", false);
+    builder
+}
+
+pub fn tickets_pod_builder(params: &Params, signed_pod: &SignedPod, expected_event_id: i64, expect_consumed: bool, blacklisted_emails: &Value) -> MainPodBuilder {
+    // Create a main pod referencing this signed pod with some statements
+    let mut builder = MainPodBuilder::new(params);
+    builder.add_signed_pod(signed_pod);
+    builder.pub_op(op!(eq, (signed_pod, "eventId"), expected_event_id));
+    builder.pub_op(op!(eq, (signed_pod, "isConsumed"), expect_consumed));
+    builder.pub_op(op!(eq, (signed_pod, "isRevoked"), false));
+    builder.pub_op(op!(not_contains, blacklisted_emails, (signed_pod, "attendeeEmail")));
+    builder
+}
+
+pub fn tickets_pod_full_flow() -> MainPodBuilder {
+    let params = Params::default();
+    let builder = tickets_sign_pod_builder(&params);
+    let signed_pod = builder.sign(&mut MockSigner { pk: "test".into() }).unwrap();
+    tickets_pod_builder(&params, &signed_pod, 123, true, &Value::Dictionary(Dictionary::new(&HashMap::new())))
 }
