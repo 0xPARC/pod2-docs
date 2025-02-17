@@ -47,8 +47,22 @@ impl fmt::Display for MerkleTree {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MerkleProof {
     existence: bool,
+    siblings: Vec<Hash>,
+}
+
+impl fmt::Display for MerkleProof {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, s) in self.siblings.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ");
+            }
+            write!(f, "{}", s);
+        }
+        Ok(())
+    }
 }
 
 impl MerkleTree {
@@ -59,19 +73,37 @@ impl MerkleTree {
 
     /// returns the value at the given key
     pub fn get(&self, key: &Value) -> Result<Value> {
-        todo!();
+        let path = keypath(*key);
+        let (v, _) = self.root.down(0, self.max_depth, path, None)?;
+        Ok(v)
     }
 
     /// returns a boolean indicating whether the key exists in the tree
     pub fn contains(&self, key: &Value) -> bool {
+        let path = keypath(*key);
+        // TODO once thiserror is added to pod2
+        // match self.root.down(0, self.max_depth, path, None) {
+        //     Ok((_, _)) => true,
+        //     Err("leaf not found")) => false,
+        //     Err(_) => false,
+        // }
         todo!();
     }
 
     /// returns a proof of existence, which proves that the given key exists in
     /// the tree. It returns the `value` of the leaf at the given `key`, and
     /// the `MerkleProof`.
-    fn prove(&self, key: &Value) -> Result<MerkleProof> {
-        todo!();
+    fn prove(&self, key: &Value) -> Result<(Value, MerkleProof)> {
+        let path = keypath(*key);
+        let (v, siblings) = self.root.down(0, self.max_depth, path, Some(Vec::new()))?;
+        Ok((
+            v,
+            MerkleProof {
+                existence: true,
+                // `unwrap` is safe since we've called `down` passing a vector
+                siblings: siblings.unwrap(),
+            },
+        ))
     }
 
     /// returns a proof of non-existence, which proves that the given `key`
@@ -155,6 +187,45 @@ impl Node {
             Self::Leaf(l) => l.hash(),
             Self::Intermediate(n) => n.hash(),
         }
+    }
+
+    /// the `siblings` parameter is used to store the siblings while going down to the leaf, if the
+    /// given parameter is set to `None`, then no siblings are stored. In this way, the same method
+    /// `down` can be used by MerkleTree methods `get`, `contains`, `prove` and
+    /// `prove_nonexistence`.
+    fn down(
+        &self,
+        lvl: usize,
+        max_depth: usize,
+        path: Vec<bool>,
+        mut siblings: Option<Vec<Hash>>,
+    ) -> Result<(Value, Option<Vec<Hash>>)> {
+        if lvl >= max_depth {
+            return Err(anyhow!("max depth reached"));
+        }
+
+        match self {
+            Self::Intermediate(n) => {
+                if path[lvl] {
+                    if let Some(ref mut s) = siblings {
+                        s.push(n.left.hash());
+                    }
+                    return n.right.down(lvl + 1, max_depth, path, siblings);
+                } else {
+                    if let Some(ref mut s) = siblings {
+                        s.push(n.right.hash());
+                    }
+                    return n.left.down(lvl + 1, max_depth, path, siblings);
+                }
+            }
+            Self::Leaf(l) => {
+                return Ok((l.value, siblings));
+            }
+            Self::None => {
+                return Err(anyhow!("leaf not found"));
+            }
+        }
+        Err(anyhow!("leaf not found"))
     }
 
     // adds the leaf at the tree from the current node (self), without computing any hash
@@ -327,22 +398,23 @@ pub mod tests {
 
     #[test]
     fn test_merkletree() -> Result<()> {
-        // let v = Value(hash_str("value_0".into()).0);
-        let v = crate::middleware::EMPTY;
-
         let mut kvs = HashMap::new();
         for i in 0..8 {
             if i == 1 {
                 continue;
             }
-            kvs.insert(Value::from(i), v);
+            kvs.insert(Value::from(i), Value::from(1000 + i));
         }
-        kvs.insert(Value::from(13), v);
+        kvs.insert(Value::from(13), Value::from(1013));
 
         let tree = MerkleTree::new(32, &kvs);
         // it should print the same tree as in
         // https://0xparc.github.io/pod2/merkletree.html#example-2
         println!("{}", tree);
+
+        let (v, proof) = tree.prove(&Value::from(13))?;
+        assert_eq!(v, Value::from(1013));
+        println!("{}", proof);
 
         Ok(())
     }
