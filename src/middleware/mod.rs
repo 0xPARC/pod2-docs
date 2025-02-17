@@ -4,7 +4,6 @@
 use anyhow::{anyhow, Error, Result};
 use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
-use itertools::Itertools;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::poseidon::PoseidonHash;
@@ -230,61 +229,6 @@ impl Default for Params {
             max_operation_args: 5,
         }
     }
-}
-
-pub trait SignedPod: fmt::Debug + DynClone {
-    fn verify(&self) -> bool;
-    fn id(&self) -> PodId;
-    // NOTE: Maybe replace this by
-    // - `get(key: Hash) -> Option<Value>`
-    // - `iter() -> impl Iter<(Hash, Value)>`
-    fn kvs(&self) -> HashMap<Hash, Value>;
-    fn pub_statements(&self) -> Vec<Statement> {
-        let id = self.id();
-        let mut statements = Vec::new();
-        for (k, v) in self.kvs().iter().sorted_by_key(|kv| kv.0) {
-            statements.push(Statement(
-                NativeStatement::ValueOf,
-                vec![
-                    StatementArg::Key(AnchoredKey(id, *k)),
-                    StatementArg::Literal(*v),
-                ],
-            ));
-        }
-        statements
-    }
-    // Used for downcasting
-    fn into_any(self: Box<Self>) -> Box<dyn Any>;
-}
-
-// impl Clone for Box<dyn SignedPod>
-dyn_clone::clone_trait_object!(SignedPod);
-
-/// This is a filler type that fulfills the SignedPod trait and always verifies.  It's empty.  This
-/// can be used to simulate padding in a circuit.
-#[derive(Debug, Clone)]
-pub struct NoneSignedPod {}
-
-impl SignedPod for NoneSignedPod {
-    fn verify(&self) -> bool {
-        true
-    }
-    fn id(&self) -> PodId {
-        PodId(NULL)
-    }
-    fn kvs(&self) -> HashMap<Hash, Value> {
-        HashMap::new()
-    }
-    fn pub_statements(&self) -> Vec<Statement> {
-        Vec::new()
-    }
-    fn into_any(self: Box<Self>) -> Box<dyn Any> {
-        self
-    }
-}
-
-pub trait PodSigner {
-    fn sign(&mut self, params: &Params, kvs: &HashMap<Hash, Value>) -> Result<Box<dyn SignedPod>>;
 }
 
 #[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
@@ -587,23 +531,40 @@ impl Operation {
     }
 }
 
-pub trait MainPod: fmt::Debug + DynClone {
+pub trait Pod: fmt::Debug + DynClone {
     fn verify(&self) -> bool;
     fn id(&self) -> PodId;
     fn pub_statements(&self) -> Vec<Statement>;
+    /// Extract key-values from ValueOf public statements
+    fn kvs(&self) -> HashMap<AnchoredKey, Value> {
+        self.pub_statements()
+            .into_iter()
+            .filter_map(|st| match st.0 {
+                NativeStatement::ValueOf => Some((
+                    st.1[0].key().expect("key"),
+                    st.1[1].literal().expect("literal"),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
     // Used for downcasting
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
 // impl Clone for Box<dyn SignedPod>
-dyn_clone::clone_trait_object!(MainPod);
+dyn_clone::clone_trait_object!(Pod);
 
-/// This is a filler type that fulfills the MainPod trait and always verifies.  It's empty.  This
+pub trait PodSigner {
+    fn sign(&mut self, params: &Params, kvs: &HashMap<Hash, Value>) -> Result<Box<dyn Pod>>;
+}
+
+/// This is a filler type that fulfills the Pod trait and always verifies.  It's empty.  This
 /// can be used to simulate padding in a circuit.
 #[derive(Debug, Clone)]
-pub struct NoneMainPod {}
+pub struct NonePod {}
 
-impl MainPod for NoneMainPod {
+impl Pod for NonePod {
     fn verify(&self) -> bool {
         true
     }
@@ -620,8 +581,8 @@ impl MainPod for NoneMainPod {
 
 #[derive(Debug)]
 pub struct MainPodInputs<'a> {
-    pub signed_pods: &'a [&'a Box<dyn SignedPod>],
-    pub main_pods: &'a [&'a Box<dyn MainPod>],
+    pub signed_pods: &'a [&'a Box<dyn Pod>],
+    pub main_pods: &'a [&'a Box<dyn Pod>],
     pub statements: &'a [Statement],
     pub operations: &'a [Operation],
     /// Statements that need to be made public (they can come from input pods or input
@@ -630,7 +591,7 @@ pub struct MainPodInputs<'a> {
 }
 
 pub trait PodProver {
-    fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Result<Box<dyn MainPod>>;
+    fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Result<Box<dyn Pod>>;
 }
 
 pub trait ToFields {

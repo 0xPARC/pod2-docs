@@ -1,6 +1,6 @@
 use crate::middleware::{
-    containers::Dictionary, hash_str, Hash, Params, PodId, PodSigner, PodType, SignedPod, Value,
-    KEY_SIGNER, KEY_TYPE,
+    containers::Dictionary, hash_str, AnchoredKey, Hash, NativeStatement, Params, Pod, PodId,
+    PodSigner, PodType, Statement, StatementArg, Value, KEY_SIGNER, KEY_TYPE,
 };
 use crate::primitives::merkletree::MerkleTree;
 use anyhow::Result;
@@ -12,7 +12,7 @@ pub struct MockSigner {
 }
 
 impl PodSigner for MockSigner {
-    fn sign(&mut self, _params: &Params, kvs: &HashMap<Hash, Value>) -> Result<Box<dyn SignedPod>> {
+    fn sign(&mut self, _params: &Params, kvs: &HashMap<Hash, Value>) -> Result<Box<dyn Pod>> {
         let mut kvs = kvs.clone();
         let pk_hash = hash_str(&self.pk);
         kvs.insert(hash_str(&KEY_SIGNER), Value(pk_hash.0));
@@ -36,7 +36,7 @@ pub struct MockSignedPod {
     dict: Dictionary,
 }
 
-impl SignedPod for MockSignedPod {
+impl Pod for MockSignedPod {
     fn verify(&self) -> bool {
         // Verify type
         let value_at_type = match self.dict.get(&hash_str(&KEY_TYPE).into()) {
@@ -77,10 +77,19 @@ impl SignedPod for MockSignedPod {
         self.id
     }
 
-    fn kvs(&self) -> HashMap<Hash, Value> {
+    fn pub_statements(&self) -> Vec<Statement> {
+        let id = self.id();
         self.dict
-            .into_iter()
-            .map(|(&k, &v)| (Hash(k.0), v))
+            .iter()
+            .map(|(k, v)| {
+                Statement(
+                    NativeStatement::ValueOf,
+                    vec![
+                        StatementArg::Key(AnchoredKey(id, Hash(k.0))),
+                        StatementArg::Literal(*v),
+                    ],
+                )
+            })
             .collect()
     }
 

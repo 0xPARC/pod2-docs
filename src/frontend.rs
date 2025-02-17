@@ -109,7 +109,7 @@ impl SignedPodBuilder {
 /// string<-->hash relation of the keys.
 #[derive(Debug, Clone)]
 pub struct SignedPod {
-    pub pod: Box<dyn middleware::SignedPod>,
+    pub pod: Box<dyn middleware::Pod>,
     /// HashMap to store the reverse relation between key strings and key hashes
     pub key_string_map: HashMap<Hash, String>,
 }
@@ -121,7 +121,7 @@ impl fmt::Display for SignedPod {
         // https://0xparc.github.io/pod2/merkletree.html will not need it since it will be
         // deterministic based on the keys values not on the order of the keys when added into the
         // tree.
-        for (k, v) in self.pod.kvs().iter().sorted_by_key(|kv| kv.0) {
+        for (k, v) in self.kvs().iter().sorted_by_key(|kv| kv.0) {
             writeln!(f, "  - {}: {}", k, v)?;
         }
         Ok(())
@@ -139,7 +139,11 @@ impl SignedPod {
         self.pod.verify()
     }
     pub fn kvs(&self) -> HashMap<Hash, middleware::Value> {
-        self.pod.kvs()
+        self.pod
+            .kvs()
+            .into_iter()
+            .map(|(middleware::AnchoredKey(_, k), v)| (k, v))
+            .collect()
     }
 }
 
@@ -411,7 +415,7 @@ impl MainPodBuilder {
 
 #[derive(Debug)]
 pub struct MainPod {
-    pub pod: Box<dyn middleware::MainPod>,
+    pub pod: Box<dyn middleware::Pod>,
     // TODO: metadata
 }
 

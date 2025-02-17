@@ -1,7 +1,6 @@
 use crate::middleware::{
-    self, hash_str, AnchoredKey, Hash, MainPod, MainPodInputs, NativeOperation, NativeStatement,
-    NoneMainPod, NoneSignedPod, Params, PodId, PodProver, SignedPod, Statement, StatementArg,
-    ToFields, KEY_TYPE, SELF,
+    self, hash_str, AnchoredKey, Hash, MainPodInputs, NativeOperation, NativeStatement, NonePod,
+    Params, Pod, PodId, PodProver, Statement, StatementArg, ToFields, KEY_TYPE, SELF,
 };
 use anyhow::Result;
 use itertools::Itertools;
@@ -13,7 +12,7 @@ use std::fmt;
 pub struct MockProver {}
 
 impl PodProver for MockProver {
-    fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Result<Box<dyn MainPod>> {
+    fn prove(&mut self, params: &Params, inputs: MainPodInputs) -> Result<Box<dyn Pod>> {
         Ok(Box::new(MockMainPod::new(params, inputs)?))
     }
 }
@@ -71,8 +70,8 @@ impl fmt::Display for Operation {
 pub struct MockMainPod {
     params: Params,
     id: PodId,
-    input_signed_pods: Vec<Box<dyn SignedPod>>,
-    input_main_pods: Vec<Box<dyn MainPod>>,
+    input_signed_pods: Vec<Box<dyn Pod>>,
+    input_main_pods: Vec<Box<dyn Pod>>,
     // New statements introduced by this pod
     input_statements: Vec<Statement>,
     public_statements: Vec<Statement>,
@@ -178,7 +177,7 @@ impl MockMainPod {
         let st_none = Self::statement_none(params);
 
         // Input signed pods region
-        let none_sig_pod: Box<dyn SignedPod> = Box::new(NoneSignedPod {});
+        let none_sig_pod: Box<dyn Pod> = Box::new(NonePod {});
         assert!(inputs.signed_pods.len() <= params.max_input_signed_pods);
         for i in 0..params.max_input_signed_pods {
             let pod = inputs
@@ -196,7 +195,7 @@ impl MockMainPod {
         }
 
         // Input main pods region
-        let none_main_pod: Box<dyn MainPod> = Box::new(NoneMainPod {});
+        let none_main_pod: Box<dyn Pod> = Box::new(NonePod {});
         assert!(inputs.main_pods.len() <= params.max_input_main_pods);
         for i in 0..params.max_input_main_pods {
             let pod = inputs
@@ -383,7 +382,7 @@ pub fn hash_statements(statements: &[middleware::Statement]) -> Result<middlewar
     Ok(Hash(PoseidonHash::hash_no_pad(&field_elems).elements))
 }
 
-impl MainPod for MockMainPod {
+impl Pod for MockMainPod {
     fn verify(&self) -> bool {
         let input_statement_offset = self.offset_input_statements();
         // get the input_statements from the self.statements
