@@ -9,166 +9,42 @@ use plonky2::hash::{hash_types::HashOut, poseidon::PoseidonHash};
 use plonky2::plonk::config::GenericConfig;
 use plonky2::plonk::config::Hasher;
 use std::collections::HashMap;
+use std::fmt;
 use std::iter::IntoIterator;
 
 use crate::middleware::{Hash, Value, C, D, F, NULL};
 
 pub struct MerkleTree {
     max_depth: usize,
-    root: Intermediate,
+    root: Node,
 }
 
-#[derive(Clone, Debug)]
-enum Node {
-    None,
-    Leaf(Leaf),
-    Intermediate(Intermediate),
-}
-impl Node {
-    fn is_empty(self) -> bool {
-        match self {
-            Self::None => true,
-            Self::Leaf(l) => false,
-            Self::Intermediate(n) => false,
+impl MerkleTree {
+    /// builds a new `MerkleTree` where the leaves contain the given key-values
+    pub fn new(max_depth: usize, kvs: &HashMap<Value, Value>) -> Self {
+        let mut root = Node::Intermediate(Intermediate::empty());
+
+        for (k, v) in kvs.iter() {
+            let leaf = Leaf::new(*k, *v);
+            root.add_leaf(0, max_depth, leaf).unwrap(); // TODO unwrap
         }
-    }
-    fn hash(self) -> Hash {
-        match self {
-            Self::None => NULL,
-            Self::Leaf(l) => l.hash(),
-            Self::Intermediate(n) => n.hash(),
-        }
-    }
-    fn add_leaf(&mut self, lvl: usize, leaf: Leaf) -> Result<()> {
-        // TODO check that lvl<=maxlevels
 
-        match self {
-            Self::Intermediate(n) => {
-                if leaf.path[lvl] {
-                    if (*n.right).clone().is_empty() {
-                        // empty sub-node, add the leaf here
-                        n.right = Box::new(Node::Leaf(leaf));
-                        return Ok(());
-                    }
-                    n.right.add_leaf(lvl + 1, leaf)?;
-                } else {
-                    if (*n.left).clone().is_empty() {
-                        // empty sub-node, add the leaf here
-                        n.left = Box::new(Node::Leaf(leaf));
-                        return Ok(());
-                    }
-                    n.left.add_leaf(lvl + 1, leaf)?;
-                }
-            }
-            Self::Leaf(l) => {
-                // in this case, it means that we found a leaf in the new-leaf path, thus we need
-                // to push both leaves (old-leaf and new-leaf) down the path till their paths
-                // diverge.
-
-                // first check that keys of both leafs are different
-                // (l: old-leaf, leaf: new-leaf)
-                if l.key == leaf.key {
-                    // TODO decide if we want to return an error when trying to add a leaf that
-                    // allready exists, or if we just ignore it
-                    return Err(anyhow!("key already exists"));
-                }
-                let old_leaf = l.clone();
-                // set self as an intermediate node
-                *self = Node::Intermediate(Intermediate::empty());
-                return self.down_till_divergence(lvl, old_leaf, leaf);
-            }
-            Self::None => {
-                return Err(anyhow!("reached empty node, should not have entered"));
-            }
-        }
-        Ok(())
-    }
-
-    fn down_till_divergence(&mut self, lvl: usize, old_leaf: Leaf, new_leaf: Leaf) -> Result<()> {
-        // TODO check that lvl<=maxlevels
-
-        if let Node::Intermediate(ref mut n) = self {
-            // let current_node: Intermediate = *self;
-            if old_leaf.path[lvl] != new_leaf.path[lvl] {
-                // reached divergence in next level, set the leafs as childs at the current node
-                if new_leaf.path[lvl] {
-                    n.left = Box::new(Node::Leaf(old_leaf));
-                    n.right = Box::new(Node::Leaf(new_leaf));
-                } else {
-                    n.left = Box::new(Node::Leaf(new_leaf));
-                    n.right = Box::new(Node::Leaf(old_leaf));
-                }
-                return Ok(());
-            }
-
-            // no divergence yet, continue going down
-            if new_leaf.path[lvl] {
-                n.right = Box::new(Node::Intermediate(Intermediate::empty()));
-                return n.right.down_till_divergence(lvl + 1, old_leaf, new_leaf);
-            } else {
-                n.left = Box::new(Node::Intermediate(Intermediate::empty()));
-                return n.left.down_till_divergence(lvl + 1, old_leaf, new_leaf);
-            }
-        }
-        Ok(())
+        let _ = root.compute_hash();
+        Self { max_depth, root }
     }
 }
 
-#[derive(Clone, Debug)]
-struct Intermediate {
-    left: Box<Node>,
-    right: Box<Node>,
-}
-impl Intermediate {
-    fn empty() -> Self {
-        Self {
-            left: Box::new(Node::None),
-            right: Box::new(Node::None),
-        }
+impl fmt::Display for MerkleTree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "\nPaste in GraphViz (https://dreampuf.github.io/GraphvizOnline/):\n-----\n"
+        );
+        write!(f, "digraph hierarchy {{\n");
+        write!(f, "node [fontname=Monospace,fontsize=10,shape=box]\n");
+        write!(f, "{}", self.root);
+        write!(f, "\n}}\n-----\n")
     }
-
-    // TODO move to a Node/Hashable trait?
-    fn hash(self) -> Hash {
-        let l_hash = self.left.hash();
-        let r_hash = self.right.hash();
-        let input: Vec<F> = [l_hash.0, r_hash.0].concat();
-        Hash(PoseidonHash::hash_no_pad(&input).elements)
-    }
-}
-
-#[derive(Clone, Debug)]
-struct Leaf {
-    path: Vec<bool>,
-    key: Value,
-    value: Value,
-}
-impl Leaf {
-    fn new(key: Value, value: Value) -> Self {
-        Self {
-            path: keypath(key),
-            key,
-            value,
-        }
-    }
-}
-impl Leaf {
-    // TODO move to a Node/Hashable trait?
-    fn hash(self) -> Hash {
-        let input: Vec<F> = [self.key.0, self.value.0].concat();
-        Hash(PoseidonHash::hash_no_pad(&input).elements)
-    }
-}
-
-// TODO 1: think if maybe the length of the returned vector can be <256 (8*bytes.len()), so that
-// we can do fewer iterations. For example, if the tree.max_depth is set to 20, we just need 20
-// iterations of the loop, not 256.
-// TODO 2: which approach do we take with keys that are longer than the max-depth? ie, what
-// happens when two keys share the same path for more bits than the max_depth?
-fn keypath(k: Value) -> Vec<bool> {
-    let bytes = k.to_bytes();
-    (0..8 * bytes.len())
-        .map(|n| bytes[n / 8] & (1 << (n % 8)) != 0)
-        .collect()
 }
 
 pub struct MerkleProof {
@@ -178,7 +54,7 @@ pub struct MerkleProof {
 impl MerkleTree {
     /// returns the root of the tree
     fn root(&self) -> Hash {
-        todo!();
+        self.root.hash()
     }
 
     /// returns the value at the given key
@@ -221,15 +97,252 @@ impl MerkleTree {
     }
 }
 
+#[derive(Clone, Debug)]
+enum Node {
+    None,
+    Leaf(Leaf),
+    Intermediate(Intermediate),
+}
+
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Intermediate(n) => {
+                write!(
+                    f,
+                    "\"{}\" -> {{ \"{}\" \"{}\" }}\n",
+                    n.hash(),
+                    n.left.hash(),
+                    n.right.hash()
+                );
+                write!(f, "{}", n.left);
+                write!(f, "{}", n.right)
+            }
+            Self::Leaf(l) => {
+                write!(f, "\"{}\" [style=filled]\n", l.hash());
+                write!(f, "\"k:{}\\nv:{}\" [style=dashed]\n", l.key, l.value);
+                write!(
+                    f,
+                    "\"{}\" -> {{ \"k:{}\\nv:{}\" }}\n",
+                    l.hash(),
+                    l.key,
+                    l.value,
+                )
+            }
+            Self::None => Ok(()),
+        }
+    }
+}
+
+impl Node {
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::None => true,
+            Self::Leaf(l) => false,
+            Self::Intermediate(n) => false,
+        }
+    }
+    fn compute_hash(&mut self) -> Hash {
+        match self {
+            Self::None => NULL,
+            Self::Leaf(l) => l.compute_hash(),
+            Self::Intermediate(n) => n.compute_hash(),
+        }
+    }
+    fn hash(&self) -> Hash {
+        match self {
+            Self::None => NULL,
+            Self::Leaf(l) => l.hash(),
+            Self::Intermediate(n) => n.hash(),
+        }
+    }
+
+    // adds the leaf at the tree from the current node (self), without computing any hash
+    fn add_leaf(&mut self, lvl: usize, max_depth: usize, leaf: Leaf) -> Result<()> {
+        if lvl >= max_depth {
+            return Err(anyhow!("max depth reached"));
+        }
+
+        match self {
+            Self::Intermediate(n) => {
+                if leaf.path[lvl] {
+                    if n.right.is_empty() {
+                        // empty sub-node, add the leaf here
+                        n.right = Box::new(Node::Leaf(leaf));
+                        return Ok(());
+                    }
+                    n.right.add_leaf(lvl + 1, max_depth, leaf)?;
+                } else {
+                    if n.left.is_empty() {
+                        // empty sub-node, add the leaf here
+                        n.left = Box::new(Node::Leaf(leaf));
+                        return Ok(());
+                    }
+                    n.left.add_leaf(lvl + 1, max_depth, leaf)?;
+                }
+            }
+            Self::Leaf(l) => {
+                // in this case, it means that we found a leaf in the new-leaf path, thus we need
+                // to push both leaves (old-leaf and new-leaf) down the path till their paths
+                // diverge.
+
+                // first check that keys of both leafs are different
+                // (l=old-leaf, leaf=new-leaf)
+                if l.key == leaf.key {
+                    // TODO decide if we want to return an error when trying to add a leaf that
+                    // allready exists, or if we just ignore it
+                    return Err(anyhow!("key already exists"));
+                }
+                let old_leaf = l.clone();
+                // set self as an intermediate node
+                *self = Node::Intermediate(Intermediate::empty());
+                return self.down_till_divergence(lvl, max_depth, old_leaf, leaf);
+            }
+            Self::None => {
+                return Err(anyhow!("reached empty node, should not have entered"));
+            }
+        }
+        Ok(())
+    }
+
+    fn down_till_divergence(
+        &mut self,
+        lvl: usize,
+        max_depth: usize,
+        old_leaf: Leaf,
+        new_leaf: Leaf,
+    ) -> Result<()> {
+        if lvl >= max_depth {
+            return Err(anyhow!("max depth reached"));
+        }
+
+        if let Node::Intermediate(ref mut n) = self {
+            // let current_node: Intermediate = *self;
+            if old_leaf.path[lvl] != new_leaf.path[lvl] {
+                // reached divergence in next level, set the leafs as childs at the current node
+                if new_leaf.path[lvl] {
+                    n.left = Box::new(Node::Leaf(old_leaf));
+                    n.right = Box::new(Node::Leaf(new_leaf));
+                } else {
+                    n.left = Box::new(Node::Leaf(new_leaf));
+                    n.right = Box::new(Node::Leaf(old_leaf));
+                }
+                return Ok(());
+            }
+
+            // no divergence yet, continue going down
+            if new_leaf.path[lvl] {
+                n.right = Box::new(Node::Intermediate(Intermediate::empty()));
+                return n
+                    .right
+                    .down_till_divergence(lvl + 1, max_depth, old_leaf, new_leaf);
+            } else {
+                n.left = Box::new(Node::Intermediate(Intermediate::empty()));
+                return n
+                    .left
+                    .down_till_divergence(lvl + 1, max_depth, old_leaf, new_leaf);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Intermediate {
+    hash: Option<Hash>,
+    left: Box<Node>,
+    right: Box<Node>,
+}
+impl Intermediate {
+    fn empty() -> Self {
+        Self {
+            hash: None,
+            left: Box::new(Node::None),
+            right: Box::new(Node::None),
+        }
+    }
+
+    fn compute_hash(&mut self) -> Hash {
+        if self.left.clone().is_empty() && self.right.clone().is_empty() {
+            self.hash = Some(NULL);
+            return NULL;
+        }
+        let l_hash = self.left.compute_hash();
+        let r_hash = self.right.compute_hash();
+        let input: Vec<F> = [l_hash.0, r_hash.0].concat();
+        let h = Hash(PoseidonHash::hash_no_pad(&input).elements);
+        self.hash = Some(h);
+        h
+    }
+    fn hash(&self) -> Hash {
+        self.hash.unwrap()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Leaf {
+    hash: Option<Hash>,
+    path: Vec<bool>,
+    key: Value,
+    value: Value,
+}
+impl Leaf {
+    fn new(key: Value, value: Value) -> Self {
+        Self {
+            hash: None,
+            path: keypath(key),
+            key,
+            value,
+        }
+    }
+}
+impl Leaf {
+    fn compute_hash(&mut self) -> Hash {
+        let input: Vec<F> = [self.key.0, self.value.0].concat();
+        let h = Hash(PoseidonHash::hash_no_pad(&input).elements);
+        self.hash = Some(h);
+        h
+    }
+    fn hash(&self) -> Hash {
+        self.hash.unwrap()
+    }
+}
+
+// TODO 1: think if maybe the length of the returned vector can be <256 (8*bytes.len()), so that
+// we can do fewer iterations. For example, if the tree.max_depth is set to 20, we just need 20
+// iterations of the loop, not 256.
+// TODO 2: which approach do we take with keys that are longer than the max-depth? ie, what
+// happens when two keys share the same path for more bits than the max_depth?
+fn keypath(k: Value) -> Vec<bool> {
+    let bytes = k.to_bytes();
+    (0..8 * bytes.len())
+        .map(|n| bytes[n / 8] & (1 << (n % 8)) != 0)
+        .collect()
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use crate::middleware::hash_str;
 
     #[test]
-    fn test_keypath() -> Result<()> {
-        let key = Value(hash_str("key".into()).0);
-        // dbg!(keypath(key));
+    fn test_merkletree() -> Result<()> {
+        // let v = Value(hash_str("value_0".into()).0);
+        let v = crate::middleware::EMPTY;
+
+        let mut kvs = HashMap::new();
+        for i in 0..8 {
+            if i == 1 {
+                continue;
+            }
+            kvs.insert(Value::from(i), v);
+        }
+        kvs.insert(Value::from(13), v);
+
+        let tree = MerkleTree::new(32, &kvs);
+        // it should print the same tree as in
+        // https://0xparc.github.io/pod2/merkletree.html#example-2
+        println!("{}", tree);
 
         Ok(())
     }
