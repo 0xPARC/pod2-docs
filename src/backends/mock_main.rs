@@ -8,6 +8,7 @@ use itertools::Itertools;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::Hasher;
 use std::any::Any;
+use std::error::Error;
 use std::fmt;
 
 pub struct MockProver {}
@@ -35,6 +36,17 @@ enum OperationArgError {
     KeyNotFound,
     StatementNotFound,
 }
+
+impl std::fmt::Display for OperationArgError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationArgError::KeyNotFound => write!(f, "Key not found"),
+            OperationArgError::StatementNotFound => write!(f, "Statement not found"),
+        }
+    }
+}
+
+impl std::error::Error for OperationArgError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Operation(pub NativeOperation, pub Vec<OperationArg>);
@@ -277,7 +289,7 @@ impl MockMainPod {
         params: &Params,
         statements: &[Statement],
         input_operations: &[middleware::Operation],
-    ) -> Vec<Operation> {
+    ) -> Result<Vec<Operation>, OperationArgError> {
         let op_none = Self::operation_none(params);
 
         let mut operations = Vec::new();
@@ -287,11 +299,12 @@ impl MockMainPod {
             Self::pad_operation_args(params, &mut mid_args);
             let mut args = Vec::with_capacity(mid_args.len());
             for mid_arg in &mid_args {
-                args.push(Self::find_op_arg(statements, mid_arg).expect("Failed to find operation argument"));
+                let op_arg = Self::find_op_arg(statements, mid_arg)?;
+                args.push(op_arg)
             }
             operations.push(Operation(op.0, args));
         }
-        operations
+        Ok(operations)
     }
 
     // NOTE: In this implementation public statements are always copies from previous statements,
@@ -300,7 +313,7 @@ impl MockMainPod {
         params: &Params,
         statements: &[Statement],
         mut operations: Vec<Operation>,
-    ) -> Vec<Operation> {
+    ) -> Result<Vec<Operation>, OperationArgError> {
         let offset_public_statements = statements.len() - params.max_public_statements;
         operations.push(Operation(NativeOperation::NewEntry, vec![]));
         for i in 0..(params.max_public_statements - 1) {
@@ -309,7 +322,7 @@ impl MockMainPod {
                 Operation(NativeOperation::None, vec![])
             } else {
                 let mid_arg = middleware::OperationArg::Statement(st.clone());
-                let op_arg = Self::find_op_arg(statements, &mid_arg).expect("Failed to find operation argument");
+                let op_arg = Self::find_op_arg(statements, &mid_arg)?;
                 Operation(
                     NativeOperation::CopyStatement,
                     vec![op_arg],
@@ -318,7 +331,7 @@ impl MockMainPod {
             fill_pad(&mut op.1, OperationArg::None, params.max_operation_args);
             operations.push(op);
         }
-        operations
+        Ok(operations)
     }
 
     pub fn new(params: &Params, inputs: MainPodInputs) -> Result<Self> {
@@ -329,9 +342,9 @@ impl MockMainPod {
         // value=PodType::MockMainPod`
         let statements = Self::layout_statements(params, &inputs);
         let operations =
-            Self::process_private_statements_operations(params, &statements, inputs.operations);
+            Self::process_private_statements_operations(params, &statements, inputs.operations)?;
         let operations =
-            Self::process_public_statements_operations(params, &statements, operations);
+            Self::process_public_statements_operations(params, &statements, operations)?;
 
         let input_signed_pods = inputs
             .signed_pods
