@@ -256,39 +256,55 @@ use std::sync::Arc;
 
 // BEGIN Custom 1b
 
-/*
-pub enum PodIdOrWildcard {
-    PodId(PodId),
-    Wildcard(usize),
-}
-
+#[derive(Debug)]
 pub enum HashOrWildcard {
     Hash(Hash),
     Wildcard(usize),
 }
 
+impl fmt::Display for HashOrWildcard {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Hash(h) => write!(f, "{}", h),
+            Self::Wildcard(n) => write!(f, "*{}", n),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum StatementTmplArg {
     None,
     Literal(Value),
-    Key(PodIdOrWildcard, HashOrWildcard),
+    Key(HashOrWildcard, HashOrWildcard),
 }
-*/
+
+impl fmt::Display for StatementTmplArg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::Literal(v) => write!(f, "{}", v),
+            Self::Key(pod_id, key) => write!(f, "({}, {})", pod_id, key),
+        }
+    }
+}
 
 // END
 
 // BEGIN Custom 2
 
-pub enum StatementTmplArg {
-    None,
-    Literal(Value),
-    Wildcard(usize),
-}
+// pub enum StatementTmplArg {
+//     None,
+//     Literal(Value),
+//     Wildcard(usize),
+// }
 
 // END
 
 /// Statement Template for a Custom Predicate
+#[derive(Debug)]
 pub struct StatementTmpl(Predicate, Vec<StatementTmplArg>);
 
+#[derive(Debug)]
 pub struct CustomPredicate {
     /// true for "and", false for "or"
     pub conjunction: bool,
@@ -298,6 +314,40 @@ pub struct CustomPredicate {
     // TODO: Add args type information?
 }
 
+impl fmt::Display for CustomPredicate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "{}<", if self.conjunction { "and" } else { "or" })?;
+        for st in &self.statements {
+            // NOTE: With recursive custom predicates we can't just display the predicate again
+            // because then this call will run into an infinite loop.  Instead we should find a way
+            // to name custom predicates and use the names here.  For this we will probably need an
+            // auxiliary data structure to hold the names, which IMO would be too complex to live
+            // in the middleware.  For the middleware we may just print the custom predicate hash.
+            match &st.0 {
+                Predicate::Native(p) => write!(f, "  {:?}(", p)?,
+                Predicate::Custom(_p) => write!(f, "  TODO(")?,
+            }
+            for (i, arg) in st.1.iter().enumerate() {
+                if i != 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", arg)?;
+            }
+            writeln!(f, "),")?;
+        }
+        write!(f, ">(")?;
+        for i in 0..self.args_len {
+            if i != 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "*{}", i)?;
+        }
+        writeln!(f, ")")?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Predicate {
     Native(NativePredicate),
     Custom(Arc<CustomPredicate>),
@@ -312,6 +362,15 @@ impl From<NativePredicate> for Predicate {
 impl ToFields for Predicate {
     fn to_fields(self) -> (Vec<F>, usize) {
         todo!()
+    }
+}
+
+impl fmt::Display for Predicate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Native(p) => write!(f, "{:?}", p),
+            Self::Custom(p) => write!(f, "{}", p),
+        }
     }
 }
 
@@ -667,20 +726,110 @@ pub trait ToFields {
 mod tests {
     use super::*;
 
+    enum HashOrWildcardStr {
+        Hash(Hash),
+        Wildcard(String),
+    }
+
+    fn l(s: &str) -> HashOrWildcardStr {
+        HashOrWildcardStr::Hash(hash_str(s))
+    }
+
+    fn w(s: &str) -> HashOrWildcardStr {
+        HashOrWildcardStr::Wildcard(s.to_string())
+    }
+
+    enum BuilderArg {
+        Literal(Value),
+        Key(HashOrWildcardStr, HashOrWildcardStr),
+    }
+
+    impl From<(HashOrWildcardStr, HashOrWildcardStr)> for BuilderArg {
+        fn from((pod_id, key): (HashOrWildcardStr, HashOrWildcardStr)) -> Self {
+            Self::Key(pod_id, key)
+        }
+    }
+
+    impl<V> From<V> for BuilderArg
+    where
+        V: Into<Value>,
+    {
+        fn from(v: V) -> Self {
+            Self::Literal(v.into())
+        }
+    }
+
     struct StatementTmplBuilder {
         predicate: Predicate,
+        args: Vec<BuilderArg>,
     }
 
     fn st_tmpl(p: impl Into<Predicate>) -> StatementTmplBuilder {
         StatementTmplBuilder {
             predicate: p.into(),
+            args: Vec::new(),
+        }
+    }
+
+    impl StatementTmplBuilder {
+        fn arg(mut self, a: impl Into<BuilderArg>) -> Self {
+            self.args.push(a.into());
+            self
         }
     }
 
     fn predicate_and(args: &[&str], priv_args: &[&str], sts: &[StatementTmplBuilder]) -> Predicate {
+        predicate(true, args, priv_args, sts)
+    }
+
+    fn predicate_or(args: &[&str], priv_args: &[&str], sts: &[StatementTmplBuilder]) -> Predicate {
+        predicate(false, args, priv_args, sts)
+    }
+
+    fn resolve_wildcard(
+        args: &[&str],
+        priv_args: &[&str],
+        v: &HashOrWildcardStr,
+    ) -> HashOrWildcard {
+        match v {
+            HashOrWildcardStr::Hash(h) => HashOrWildcard::Hash(*h),
+            HashOrWildcardStr::Wildcard(s) => HashOrWildcard::Wildcard(
+                args.iter()
+                    .chain(priv_args.iter())
+                    .enumerate()
+                    .find_map(|(i, name)| (&s == name).then_some(i))
+                    .unwrap(),
+            ),
+        }
+    }
+
+    fn predicate(
+        conjunction: bool,
+        args: &[&str],
+        priv_args: &[&str],
+        sts: &[StatementTmplBuilder],
+    ) -> Predicate {
+        use BuilderArg as BA;
+        let statements = sts
+            .iter()
+            .map(|sb| {
+                let args = sb
+                    .args
+                    .iter()
+                    .map(|a| match a {
+                        BA::Literal(v) => StatementTmplArg::Literal(*v),
+                        BA::Key(pod_id, key) => StatementTmplArg::Key(
+                            resolve_wildcard(args, priv_args, pod_id),
+                            resolve_wildcard(args, priv_args, key),
+                        ),
+                    })
+                    .collect();
+                StatementTmpl(sb.predicate.clone(), args)
+            })
+            .collect();
         let custom_predicate = CustomPredicate {
-            conjunction: true,
-            statements: vec![], // TODO
+            conjunction,
+            statements,
             args_len: args.len(),
         };
         Predicate::Custom(Arc::new(custom_predicate))
@@ -688,11 +837,109 @@ mod tests {
 
     #[test]
     fn test_custom_pred() {
-        use NativePredicate::*;
+        use NativePredicate as NP;
         let eth_friend = predicate_and(
             &["src_or", "src_key", "dst_or", "dst_key"],
             &["attestation_pod"],
-            &[st_tmpl(Equal)],
+            &[
+                st_tmpl(NP::ValueOf)
+                    .arg((w("attestation_pod"), l("type")))
+                    .arg(PodType::Signed),
+                st_tmpl(NP::Equal)
+                    .arg((w("attestation_pod"), l("signer")))
+                    .arg((w("src_or"), w("src_key"))),
+                st_tmpl(NP::Equal)
+                    .arg((w("attestation_pod"), l("attestation")))
+                    .arg((w("dst_or"), w("dst_key"))),
+            ],
         );
+
+        println!("eth_friend = {}", eth_friend);
+
+        let eth_dos_distance_base = predicate_and(
+            &[
+                "src_or",
+                "src_key",
+                "dst_or",
+                "dst_key",
+                "distance_or",
+                "distance_key",
+            ],
+            &[],
+            &[
+                st_tmpl(NP::Equal)
+                    .arg((w("src_or"), l("src_key")))
+                    .arg((w("dst_or"), w("dst_key"))),
+                st_tmpl(NP::ValueOf)
+                    .arg((w("distance_or"), w("distance_key")))
+                    .arg(0),
+            ],
+        );
+
+        println!("eth_dos_distance_base = {}", eth_dos_distance_base);
+
+        // TODO: replace this with a symbolic predicate index for recursion
+        let eth_dos_distance = NativePredicate::None;
+
+        let eth_dos_distance_ind = predicate_and(
+            &[
+                "src_or",
+                "src_key",
+                "dst_or",
+                "dst_key",
+                "distance_or",
+                "distance_key",
+            ],
+            &[
+                "one_or",
+                "one_key",
+                "shorter_distance_or",
+                "shorter_distance_key",
+                "intermed_or",
+                "intermed_key",
+            ],
+            &[
+                st_tmpl(eth_dos_distance) // TODO: Handle recursion
+                    .arg((w("src_or"), w("src_key")))
+                    .arg((w("intermed_or"), w("intermed_key")))
+                    .arg((w("shorter_distance_or"), w("shorter_distance_key"))),
+                // distance == shorter_distance + 1
+                st_tmpl(NP::ValueOf).arg((w("one_or"), w("one_key"))).arg(1),
+                st_tmpl(NP::SumOf)
+                    .arg((w("distance_or"), w("distance_key")))
+                    .arg((w("shorter_distance_or"), w("shorter_distance_key")))
+                    .arg((w("one_or"), w("one_key"))),
+                // intermed is a friend of dst
+                st_tmpl(eth_friend)
+                    .arg((w("intermed_or"), w("intermed_key")))
+                    .arg((w("dst_or"), w("dst_key"))),
+            ],
+        );
+
+        println!("eth_dos_distance_ind = {}", eth_dos_distance_ind);
+
+        let eth_dos_distance = predicate_or(
+            &[
+                "src_or",
+                "src_key",
+                "dst_or",
+                "dst_key",
+                "distance_or",
+                "distance_key",
+            ],
+            &[],
+            &[
+                st_tmpl(eth_dos_distance_base)
+                    .arg((w("src_or"), w("src_key")))
+                    .arg((w("dst_or"), w("dst_key")))
+                    .arg((w("distance_or"), w("distance_key"))),
+                st_tmpl(eth_dos_distance_ind)
+                    .arg((w("src_or"), w("src_key")))
+                    .arg((w("dst_or"), w("dst_key")))
+                    .arg((w("distance_or"), w("distance_key"))),
+            ],
+        );
+
+        println!("eth_dos_distance = {}", eth_dos_distance);
     }
 }
