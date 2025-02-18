@@ -318,15 +318,7 @@ impl fmt::Display for CustomPredicate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{}<", if self.conjunction { "and" } else { "or" })?;
         for st in &self.statements {
-            // NOTE: With recursive custom predicates we can't just display the predicate again
-            // because then this call will run into an infinite loop.  Instead we should find a way
-            // to name custom predicates and use the names here.  For this we will probably need an
-            // auxiliary data structure to hold the names, which IMO would be too complex to live
-            // in the middleware.  For the middleware we may just print the custom predicate hash.
-            match &st.0 {
-                Predicate::Native(p) => write!(f, "  {:?}(", p)?,
-                Predicate::Custom(_p) => write!(f, "  TODO(")?,
-            }
+            write!(f, "  {}", st.0)?;
             for (i, arg) in st.1.iter().enumerate() {
                 if i != 0 {
                     write!(f, ", ")?;
@@ -347,10 +339,23 @@ impl fmt::Display for CustomPredicate {
     }
 }
 
+#[derive(Debug)]
+pub struct CustomPredicateBatch {
+    predicates: Vec<CustomPredicate>,
+}
+
+impl CustomPredicateBatch {
+    pub fn hash(&self) -> Hash {
+        // TODO
+        hash_str(&format!("{:?}", self))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Predicate {
     Native(NativePredicate),
-    Custom(Arc<CustomPredicate>),
+    BatchSelf(usize),
+    Custom(Arc<CustomPredicateBatch>, usize),
 }
 
 impl From<NativePredicate> for Predicate {
@@ -369,7 +374,8 @@ impl fmt::Display for Predicate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Native(p) => write!(f, "{:?}", p),
-            Self::Custom(p) => write!(f, "{}", p),
+            Self::BatchSelf(i) => write!(f, "self.{}", i),
+            Self::Custom(pb, i) => write!(f, "{}.{}", pb.hash(), i),
         }
     }
 }
@@ -778,12 +784,74 @@ mod tests {
         }
     }
 
-    fn predicate_and(args: &[&str], priv_args: &[&str], sts: &[StatementTmplBuilder]) -> Predicate {
-        predicate(true, args, priv_args, sts)
+    struct CustomPredicateBatchBuilder {
+        predicates: Vec<CustomPredicate>,
     }
 
-    fn predicate_or(args: &[&str], priv_args: &[&str], sts: &[StatementTmplBuilder]) -> Predicate {
-        predicate(false, args, priv_args, sts)
+    impl CustomPredicateBatchBuilder {
+        fn new() -> Self {
+            Self {
+                predicates: Vec::new(),
+            }
+        }
+
+        fn predicate_and(
+            &mut self,
+            args: &[&str],
+            priv_args: &[&str],
+            sts: &[StatementTmplBuilder],
+        ) -> Predicate {
+            self.predicate(true, args, priv_args, sts)
+        }
+
+        fn predicate_or(
+            &mut self,
+            args: &[&str],
+            priv_args: &[&str],
+            sts: &[StatementTmplBuilder],
+        ) -> Predicate {
+            self.predicate(false, args, priv_args, sts)
+        }
+
+        fn predicate(
+            &mut self,
+            conjunction: bool,
+            args: &[&str],
+            priv_args: &[&str],
+            sts: &[StatementTmplBuilder],
+        ) -> Predicate {
+            use BuilderArg as BA;
+            let statements = sts
+                .iter()
+                .map(|sb| {
+                    let args = sb
+                        .args
+                        .iter()
+                        .map(|a| match a {
+                            BA::Literal(v) => StatementTmplArg::Literal(*v),
+                            BA::Key(pod_id, key) => StatementTmplArg::Key(
+                                resolve_wildcard(args, priv_args, pod_id),
+                                resolve_wildcard(args, priv_args, key),
+                            ),
+                        })
+                        .collect();
+                    StatementTmpl(sb.predicate.clone(), args)
+                })
+                .collect();
+            let custom_predicate = CustomPredicate {
+                conjunction,
+                statements,
+                args_len: args.len(),
+            };
+            self.predicates.push(custom_predicate);
+            Predicate::BatchSelf(self.predicates.len() - 1)
+        }
+
+        fn finish(self) -> Arc<CustomPredicateBatch> {
+            Arc::new(CustomPredicateBatch {
+                predicates: self.predicates,
+            })
+        }
     }
 
     fn resolve_wildcard(
@@ -803,42 +871,12 @@ mod tests {
         }
     }
 
-    fn predicate(
-        conjunction: bool,
-        args: &[&str],
-        priv_args: &[&str],
-        sts: &[StatementTmplBuilder],
-    ) -> Predicate {
-        use BuilderArg as BA;
-        let statements = sts
-            .iter()
-            .map(|sb| {
-                let args = sb
-                    .args
-                    .iter()
-                    .map(|a| match a {
-                        BA::Literal(v) => StatementTmplArg::Literal(*v),
-                        BA::Key(pod_id, key) => StatementTmplArg::Key(
-                            resolve_wildcard(args, priv_args, pod_id),
-                            resolve_wildcard(args, priv_args, key),
-                        ),
-                    })
-                    .collect();
-                StatementTmpl(sb.predicate.clone(), args)
-            })
-            .collect();
-        let custom_predicate = CustomPredicate {
-            conjunction,
-            statements,
-            args_len: args.len(),
-        };
-        Predicate::Custom(Arc::new(custom_predicate))
-    }
-
     #[test]
     fn test_custom_pred() {
         use NativePredicate as NP;
-        let eth_friend = predicate_and(
+
+        let mut builder = CustomPredicateBatchBuilder::new();
+        let eth_friend = builder.predicate_and(
             &["src_or", "src_key", "dst_or", "dst_key"],
             &["attestation_pod"],
             &[
@@ -854,9 +892,13 @@ mod tests {
             ],
         );
 
-        println!("eth_friend = {}", eth_friend);
+        println!("a.0. eth_friend = {}", builder.predicates.last().unwrap());
+        let eth_friend = builder.finish();
+        // This batch only has 1 predicate, so we pick it already for convenience
+        let eth_friend = Predicate::Custom(eth_friend, 0);
 
-        let eth_dos_distance_base = predicate_and(
+        let mut builder = CustomPredicateBatchBuilder::new();
+        let eth_dos_distance_base = builder.predicate_and(
             &[
                 "src_or",
                 "src_key",
@@ -876,12 +918,14 @@ mod tests {
             ],
         );
 
-        println!("eth_dos_distance_base = {}", eth_dos_distance_base);
+        println!(
+            "b.0. eth_dos_distance_base = {}",
+            builder.predicates.last().unwrap()
+        );
 
-        // TODO: replace this with a symbolic predicate index for recursion
-        let eth_dos_distance = NativePredicate::None;
+        let eth_dos_distance = Predicate::BatchSelf(3);
 
-        let eth_dos_distance_ind = predicate_and(
+        let eth_dos_distance_ind = builder.predicate_and(
             &[
                 "src_or",
                 "src_key",
@@ -899,7 +943,7 @@ mod tests {
                 "intermed_key",
             ],
             &[
-                st_tmpl(eth_dos_distance) // TODO: Handle recursion
+                st_tmpl(eth_dos_distance)
                     .arg((w("src_or"), w("src_key")))
                     .arg((w("intermed_or"), w("intermed_key")))
                     .arg((w("shorter_distance_or"), w("shorter_distance_key"))),
@@ -916,9 +960,12 @@ mod tests {
             ],
         );
 
-        println!("eth_dos_distance_ind = {}", eth_dos_distance_ind);
+        println!(
+            "b.1. eth_dos_distance_ind = {}",
+            builder.predicates.last().unwrap()
+        );
 
-        let eth_dos_distance = predicate_or(
+        let eth_dos_distance = builder.predicate_or(
             &[
                 "src_or",
                 "src_key",
@@ -940,6 +987,9 @@ mod tests {
             ],
         );
 
-        println!("eth_dos_distance = {}", eth_dos_distance);
+        println!(
+            "b.2. eth_dos_distance = {}",
+            builder.predicates.last().unwrap()
+        );
     }
 }
