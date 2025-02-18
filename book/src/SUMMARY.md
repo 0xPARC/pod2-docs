@@ -18,3 +18,6 @@
   - [MainPOD](./mainpod.md)
   - [MockPOD](./mockpod.md)
 - [Examples](./examples.md)
+
+# Architecture
+- [Architecture](./architecture.md)
