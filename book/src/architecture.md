@@ -18,7 +18,7 @@ The main logic of the POD2 implementation is divided into three modules:
 If this was the Rust language compiler:
 - frontend: takes a Rust code and compiles it to LLVM-IR
 - middleware: defines LLVM-IR instructions and blocks
-- backend: Takes LLVM-IR instructions and emmits assembly code for a particular CPU
+- backend: Takes LLVM-IR instructions and emits assembly code for a particular CPU
 
 The following diagram shows visually how the components interact with each other:
 
@@ -30,7 +30,7 @@ In this organization, the middleware could be defined at arbitrary points:
 
 All these positions are OK.  We just need to choose one, and we can try to choose a point that simplifies the implementation.
 
-For example in the middleware we could define `Value = 4 x Goldilock` (making it slighly low level); or `Value = BigUint` and letting the backend choose the maximum representable value, the field encoding, etc. (making it slighly higher level).
+For example in the middleware we could define `Value = 4 x Goldilock` (making it slightly low level); or `Value = BigUint` and letting the backend choose the maximum representable value, the field encoding, etc. (making it slightly higher level).
 
 In the current iteration we choose `Value = 4 x Goldilock`, but we can revisit it in a future iteration (eg. if we want to support plonky3) by either moving the middleware to a higher level, or by keeping it the same and replacing the `Value` definition.
 
