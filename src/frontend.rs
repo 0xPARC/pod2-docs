@@ -10,7 +10,7 @@ use std::fmt;
 use crate::middleware::{
     self,
     containers::{Array, Dictionary, Set},
-    hash_str, Hash, MainPodInputs, NativeOperation, NativeStatement, Params, PodId, PodProver,
+    hash_str, Hash, MainPodInputs, NativeOperation, NativePredicate, Params, PodId, PodProver,
     PodSigner, SELF,
 };
 
@@ -166,7 +166,7 @@ impl fmt::Display for StatementArg {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
+pub struct Statement(pub NativePredicate, pub Vec<StatementArg>);
 
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -350,27 +350,27 @@ impl MainPodBuilder {
         let Operation(op_type, ref mut args) = op;
         // TODO: argument type checking
         let st = match op_type {
-            None => Statement(NativeStatement::None, vec![]),
-            NewEntry => Statement(NativeStatement::ValueOf, self.op_args_entries(public, args)),
+            None => Statement(NativePredicate::None, vec![]),
+            NewEntry => Statement(NativePredicate::ValueOf, self.op_args_entries(public, args)),
             CopyStatement => todo!(),
             EqualFromEntries => {
-                Statement(NativeStatement::Equal, self.op_args_entries(public, args))
+                Statement(NativePredicate::Equal, self.op_args_entries(public, args))
             }
             NotEqualFromEntries => Statement(
-                NativeStatement::NotEqual,
+                NativePredicate::NotEqual,
                 self.op_args_entries(public, args),
             ),
-            GtFromEntries => Statement(NativeStatement::Gt, self.op_args_entries(public, args)),
-            LtFromEntries => Statement(NativeStatement::Lt, self.op_args_entries(public, args)),
+            GtFromEntries => Statement(NativePredicate::Gt, self.op_args_entries(public, args)),
+            LtFromEntries => Statement(NativePredicate::Lt, self.op_args_entries(public, args)),
             TransitiveEqualFromStatements => todo!(),
             GtToNotEqual => todo!(),
             LtToNotEqual => todo!(),
             ContainsFromEntries => Statement(
-                NativeStatement::Contains,
+                NativePredicate::Contains,
                 self.op_args_entries(public, args),
             ),
             NotContainsFromEntries => Statement(
-                NativeStatement::NotContains,
+                NativePredicate::NotContains,
                 self.op_args_entries(public, args),
             ),
             RenameContainedBy => todo!(),

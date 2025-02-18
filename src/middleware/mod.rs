@@ -232,7 +232,7 @@ impl Default for Params {
 }
 
 #[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
-pub enum NativeStatement {
+pub enum NativePredicate {
     None = 0,
     ValueOf = 1,
     Equal = 2,
@@ -246,9 +246,72 @@ pub enum NativeStatement {
     MaxOf = 10,
 }
 
-impl ToFields for NativeStatement {
+impl ToFields for NativePredicate {
     fn to_fields(self) -> (Vec<F>, usize) {
         (vec![F::from_canonical_u64(self as u64)], 1)
+    }
+}
+
+use std::sync::Arc;
+
+// BEGIN Custom 1b
+
+/*
+pub enum PodIdOrWildcard {
+    PodId(PodId),
+    Wildcard(usize),
+}
+
+pub enum HashOrWildcard {
+    Hash(Hash),
+    Wildcard(usize),
+}
+
+pub enum StatementTmplArg {
+    None,
+    Literal(Value),
+    Key(PodIdOrWildcard, HashOrWildcard),
+}
+*/
+
+// END
+
+// BEGIN Custom 2
+
+pub enum StatementTmplArg {
+    None,
+    Literal(Value),
+    Wildcard(usize),
+}
+
+// END
+
+/// Statement Template for a Custom Predicate
+pub struct StatementTmpl(Predicate, Vec<StatementTmplArg>);
+
+pub struct CustomPredicate {
+    /// true for "and", false for "or"
+    pub conjunction: bool,
+    pub statements: Vec<StatementTmpl>,
+    pub args_len: usize,
+    // TODO: Add private args length?
+    // TODO: Add args type information?
+}
+
+pub enum Predicate {
+    Native(NativePredicate),
+    Custom(Arc<CustomPredicate>),
+}
+
+impl From<NativePredicate> for Predicate {
+    fn from(v: NativePredicate) -> Self {
+        Self::Native(v)
+    }
+}
+
+impl ToFields for Predicate {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        todo!()
     }
 }
 
@@ -332,7 +395,7 @@ impl ToFields for StatementArg {
 
 // TODO: Replace this with a more stringly typed enum as in the Devcon implementation.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
+pub struct Statement(pub NativePredicate, pub Vec<StatementArg>);
 
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -350,14 +413,14 @@ impl fmt::Display for Statement {
 }
 
 impl Statement {
-    pub fn code(&self) -> NativeStatement {
+    pub fn code(&self) -> NativePredicate {
         self.0
     }
     pub fn args(&self) -> &[StatementArg] {
         &self.1
     }
     pub fn is_none(&self) -> bool {
-        matches!(self.0, NativeStatement::None)
+        matches!(self.0, NativePredicate::None)
     }
 }
 
@@ -443,11 +506,11 @@ impl Operation {
         use NativeOperation::*;
         match self.0 {
             // Nothing to check.
-            None => Ok(output_statement.code() == NativeStatement::None),
+            None => Ok(output_statement.code() == NativePredicate::None),
             // Check that the resulting statement is of type `ValueOf`
             // and its origin is `SELF`.
             NewEntry =>
-                Ok(output_statement.code() == NativeStatement::ValueOf && output_statement.args()[0].key()?.origin() == SELF)
+                Ok(output_statement.code() == NativePredicate::ValueOf && output_statement.args()[0].key()?.origin() == SELF)
             ,
             // Check that the operation acts on a statement *and* the
             // output is equal to this statement.
@@ -458,30 +521,30 @@ impl Operation {
                 let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
                 let s2 = self.args()[1].statement()?;
                 let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value == s2_value;
-                Ok(statements_equal && output_statement.code() == NativeStatement::Equal && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}
+                let statements_equal = s1.code() == NativePredicate::ValueOf && s2.code() == NativePredicate::ValueOf && s1_value == s2_value;
+                Ok(statements_equal && output_statement.code() == NativePredicate::Equal && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}
             ,
             NotEqualFromEntries => {
                 let s1 = self.args()[0].statement()?;
                 let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
                 let s2 = self.args()[1].statement()?;
                 let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value != s2_value;
-                Ok(statements_not_equal && output_statement.code() == NativeStatement::NotEqual && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}                ,
+                let statements_not_equal = s1.code() == NativePredicate::ValueOf && s2.code() == NativePredicate::ValueOf && s1_value != s2_value;
+                Ok(statements_not_equal && output_statement.code() == NativePredicate::NotEqual && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}                ,
             GtFromEntries => {
                 let s1 = self.args()[0].statement()?;
                 let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
                 let s2 = self.args()[1].statement()?;
                 let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value > s2_value;
-                Ok(statements_not_equal && output_statement.code() == NativeStatement::Gt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
+                let statements_not_equal = s1.code() == NativePredicate::ValueOf && s2.code() == NativePredicate::ValueOf && s1_value > s2_value;
+                Ok(statements_not_equal && output_statement.code() == NativePredicate::Gt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
             LtFromEntries => {
                 let s1 = self.args()[0].statement()?;
                 let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
                 let s2 = self.args()[1].statement()?;
                 let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value < s2_value;
-                Ok(statements_not_equal && output_statement.code() == NativeStatement::Lt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
+                let statements_not_equal = s1.code() == NativePredicate::ValueOf && s2.code() == NativePredicate::ValueOf && s1_value < s2_value;
+                Ok(statements_not_equal && output_statement.code() == NativePredicate::Lt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
             TransitiveEqualFromStatements => {
                 let s1 = self.args()[0].statement()?;
                 let s2 = self.args()[1].statement()?;
@@ -489,18 +552,18 @@ impl Operation {
                 let key2 = s1.args()[1].key()?;
                 let key3 = s2.args()[0].key()?;
                 let key4 = s2.args()[1].key()?;
-                let statements_satisfy_transitivity = s1.code() == NativeStatement::Equal && s2.code() == NativeStatement::Equal && key2 == key3;
-                Ok(statements_satisfy_transitivity && output_statement.code() == NativeStatement::Equal && output_statement.args()[0].key()? == key1 && output_statement.args()[1].key()? == key4)
+                let statements_satisfy_transitivity = s1.code() == NativePredicate::Equal && s2.code() == NativePredicate::Equal && key2 == key3;
+                Ok(statements_satisfy_transitivity && output_statement.code() == NativePredicate::Equal && output_statement.args()[0].key()? == key1 && output_statement.args()[1].key()? == key4)
             },
             GtToNotEqual => {
                 let s = self.args()[0].statement()?;
-                let arg_is_gt = s.code() == NativeStatement::Gt;
-                Ok(arg_is_gt && output_statement.code() == NativeStatement::NotEqual && output_statement.args() == s.args())
+                let arg_is_gt = s.code() == NativePredicate::Gt;
+                Ok(arg_is_gt && output_statement.code() == NativePredicate::NotEqual && output_statement.args() == s.args())
             },
             LtToNotEqual => {
                 let s = self.args()[0].statement()?;
-                let arg_is_lt = s.code() == NativeStatement::Lt;
-                Ok(arg_is_lt && output_statement.code() == NativeStatement::NotEqual && output_statement.args() == s.args())
+                let arg_is_lt = s.code() == NativePredicate::Lt;
+                Ok(arg_is_lt && output_statement.code() == NativePredicate::NotEqual && output_statement.args() == s.args())
             },
             RenameContainedBy => {
                 let s1 = self.args()[0].statement()?;
@@ -509,8 +572,8 @@ impl Operation {
                 let key2 = s1.args()[1].key()?;
                 let key3 = s2.args()[0].key()?;
                 let key4 = s2.args()[1].key()?;
-                let args_satisfy_rename = s1.code() == NativeStatement::Contains && s2.code() == NativeStatement::Equal && key1 == key3;
-                Ok(args_satisfy_rename && output_statement.code() == NativeStatement::Contains && output_statement.args()[0].key()? == key4 && output_statement.args()[1].key()? == key2)
+                let args_satisfy_rename = s1.code() == NativePredicate::Contains && s2.code() == NativePredicate::Equal && key1 == key3;
+                Ok(args_satisfy_rename && output_statement.code() == NativePredicate::Contains && output_statement.args()[0].key()? == key4 && output_statement.args()[1].key()? == key2)
             },
             SumOf => {
                 let s1 = self.args()[0].statement()?;
@@ -522,8 +585,8 @@ impl Operation {
                 let s3 = self.args()[2].statement()?;
                 let s3_key = s3.args()[0].key()?;
                 let s3_value: i64 = s3.args()[1].literal()?.try_into()?;
-                let sum_holds = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s3.code() == NativeStatement::ValueOf && s1_value == s2_value + s3_value;
-                Ok(sum_holds && output_statement.code() == NativeStatement::SumOf && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key && output_statement.args()[2].key()? == s3_key)
+                let sum_holds = s1.code() == NativePredicate::ValueOf && s2.code() == NativePredicate::ValueOf && s3.code() == NativePredicate::ValueOf && s1_value == s2_value + s3_value;
+                Ok(sum_holds && output_statement.code() == NativePredicate::SumOf && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key && output_statement.args()[2].key()? == s3_key)
             },
             // TODO: Remaining ops.
             _ => Ok(true)
@@ -540,7 +603,7 @@ pub trait Pod: fmt::Debug + DynClone {
         self.pub_statements()
             .into_iter()
             .filter_map(|st| match st.0 {
-                NativeStatement::ValueOf => Some((
+                NativePredicate::ValueOf => Some((
                     st.1[0].key().expect("key"),
                     st.1[1].literal().expect("literal"),
                 )),
@@ -598,4 +661,38 @@ pub trait ToFields {
     /// returns Vec<F> representation of the type, and a usize indicating how many field elements
     /// does the vector contain
     fn to_fields(self) -> (Vec<F>, usize);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StatementTmplBuilder {
+        predicate: Predicate,
+    }
+
+    fn st_tmpl(p: impl Into<Predicate>) -> StatementTmplBuilder {
+        StatementTmplBuilder {
+            predicate: p.into(),
+        }
+    }
+
+    fn predicate_and(args: &[&str], priv_args: &[&str], sts: &[StatementTmplBuilder]) -> Predicate {
+        let custom_predicate = CustomPredicate {
+            conjunction: true,
+            statements: vec![], // TODO
+            args_len: args.len(),
+        };
+        Predicate::Custom(Arc::new(custom_predicate))
+    }
+
+    #[test]
+    fn test_custom_pred() {
+        use NativePredicate::*;
+        let eth_friend = predicate_and(
+            &["src_or", "src_key", "dst_or", "dst_key"],
+            &["attestation_pod"],
+            &[st_tmpl(Equal)],
+        );
+    }
 }

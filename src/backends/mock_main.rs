@@ -1,5 +1,5 @@
 use crate::middleware::{
-    self, hash_str, AnchoredKey, Hash, MainPodInputs, NativeOperation, NativeStatement, NonePod,
+    self, hash_str, AnchoredKey, Hash, MainPodInputs, NativeOperation, NativePredicate, NonePod,
     Params, Pod, PodId, PodProver, Statement, StatementArg, ToFields, KEY_TYPE, SELF,
 };
 use anyhow::Result;
@@ -241,7 +241,7 @@ impl MockMainPod {
         // Public statements
         assert!(inputs.public_statements.len() < params.max_public_statements);
         statements.push(Statement(
-            NativeStatement::ValueOf,
+            NativePredicate::ValueOf,
             vec![StatementArg::Key(AnchoredKey(SELF, hash_str(KEY_TYPE)))],
         ));
         for i in 0..(params.max_public_statements - 1) {
@@ -264,7 +264,7 @@ impl MockMainPod {
                     .iter()
                     .enumerate()
                     .find_map(|(i, s)| match s.0 {
-                        NativeStatement::ValueOf => match &s.1[0] {
+                        NativePredicate::ValueOf => match &s.1[0] {
                             StatementArg::Key(sk) => (sk == k).then_some(i),
                             _ => None,
                         },
@@ -373,7 +373,7 @@ impl MockMainPod {
     fn statement_none(params: &Params) -> Statement {
         let mut args = Vec::with_capacity(params.max_statement_args);
         Self::pad_statement_args(&params, &mut args);
-        Statement(NativeStatement::None, args)
+        Statement(NativePredicate::None, args)
     }
 
     fn operation_none(params: &Params) -> middleware::Operation {
@@ -416,7 +416,7 @@ impl Pod for MockMainPod {
             .public_statements
             .iter()
             .find(|s| {
-                s.0 == NativeStatement::ValueOf
+                s.0 == NativePredicate::ValueOf
                     && s.1.len() > 0
                     && if let StatementArg::Key(AnchoredKey(pod_id, key_hash)) = s.1[0] {
                         pod_id == SELF && key_hash == hash_str(KEY_TYPE)
@@ -444,7 +444,7 @@ impl Pod for MockMainPod {
                         s,
                     )
                 })
-                .filter(|(i, s)| s.0 == NativeStatement::ValueOf)
+                .filter(|(i, s)| s.0 == NativePredicate::ValueOf)
                 .flat_map(|(i, s)| {
                     if let StatementArg::Key(ak) = &s.1[0] {
                         vec![(i, ak.1, ak.0)]
