@@ -21,29 +21,29 @@ pub struct MerkleTree {
 
 impl MerkleTree {
     /// builds a new `MerkleTree` where the leaves contain the given key-values
-    pub fn new(max_depth: usize, kvs: &HashMap<Value, Value>) -> Self {
+    pub fn new(max_depth: usize, kvs: &HashMap<Value, Value>) -> Result<Self> {
         let mut root = Node::Intermediate(Intermediate::empty());
 
         for (k, v) in kvs.iter() {
-            let leaf = Leaf::new(*k, *v);
-            root.add_leaf(0, max_depth, leaf).unwrap(); // TODO unwrap
+            let leaf = Leaf::new(max_depth, *k, *v)?;
+            root.add_leaf(0, max_depth, leaf)?;
         }
 
         let _ = root.compute_hash();
-        Self { max_depth, root }
+        Ok(Self { max_depth, root })
     }
 }
 
 impl fmt::Display for MerkleTree {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
+        writeln!(
             f,
-            "\nPaste in GraphViz (https://dreampuf.github.io/GraphvizOnline/):\n-----\n"
+            "\nPaste in GraphViz (https://dreampuf.github.io/GraphvizOnline/):\n-----"
         );
-        write!(f, "digraph hierarchy {{\n");
-        write!(f, "node [fontname=Monospace,fontsize=10,shape=box]\n");
+        writeln!(f, "digraph hierarchy {{");
+        writeln!(f, "node [fontname=Monospace,fontsize=10,shape=box]");
         write!(f, "{}", self.root);
-        write!(f, "\n}}\n-----\n")
+        writeln!(f, "\n}}\n-----")
     }
 }
 
@@ -73,28 +73,29 @@ impl MerkleTree {
 
     /// returns the value at the given key
     pub fn get(&self, key: &Value) -> Result<Value> {
-        let path = keypath(*key);
+        let path = keypath(self.max_depth, *key)?;
         let (v, _) = self.root.down(0, self.max_depth, path, None)?;
         Ok(v)
     }
 
     /// returns a boolean indicating whether the key exists in the tree
     pub fn contains(&self, key: &Value) -> bool {
-        let path = keypath(*key);
-        // TODO once thiserror is added to pod2
+        // WIP once thiserror is added to pod2, this method is just like `.get` but returning
+        // true/false if the error matches the key-non-existing error returned by `down`
+        // let path = keypath(self.max_depth, *key)?;
         // match self.root.down(0, self.max_depth, path, None) {
         //     Ok((_, _)) => true,
         //     Err("leaf not found")) => false,
         //     Err(_) => false,
         // }
-        todo!();
+        unimplemented!();
     }
 
     /// returns a proof of existence, which proves that the given key exists in
     /// the tree. It returns the `value` of the leaf at the given `key`, and
     /// the `MerkleProof`.
     fn prove(&self, key: &Value) -> Result<(Value, MerkleProof)> {
-        let path = keypath(*key);
+        let path = keypath(self.max_depth, *key)?;
         let (v, siblings) = self.root.down(0, self.max_depth, path, Some(Vec::new()))?;
         Ok((
             v,
@@ -109,12 +110,41 @@ impl MerkleTree {
     /// returns a proof of non-existence, which proves that the given `key`
     /// does not exist in the tree
     fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
+        // note: non-existence of a key can be in 2 cases:
+        // - the expected leaf does not exist
+        // - the expected leaf does exist in the tree, but it has a different `key`
+        // both cases prove that the given key don't exist in the tree.
         todo!();
     }
 
     /// verifies an inclusion proof for the given `key` and `value`
-    fn verify(root: Hash, proof: &MerkleProof, key: &Value, value: &Value) -> Result<()> {
-        todo!();
+    fn verify(
+        max_depth: usize,
+        root: Hash,
+        proof: &MerkleProof,
+        key: &Value,
+        value: &Value,
+    ) -> Result<()> {
+        if proof.siblings.len() >= max_depth {
+            return Err(anyhow!("max depth reached"));
+        }
+
+        let path = keypath(max_depth, *key)?;
+        let input: Vec<F> = [key.0, value.0].concat();
+        let mut h = Hash(PoseidonHash::hash_no_pad(&input).elements);
+        for (i, sibling) in proof.siblings.iter().enumerate().rev() {
+            let input: Vec<F> = if path[i] {
+                [sibling.0, h.0].concat()
+            } else {
+                [h.0, sibling.0].concat()
+            };
+            h = Hash(PoseidonHash::hash_no_pad(&input).elements);
+        }
+
+        if h != root {
+            return Err(anyhow!("proof of inclusion does not verify"));
+        }
+        Ok(())
     }
 
     /// verifies a non-inclusion proof for the given `key`, that is, the given
@@ -140,9 +170,9 @@ impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Intermediate(n) => {
-                write!(
+                writeln!(
                     f,
-                    "\"{}\" -> {{ \"{}\" \"{}\" }}\n",
+                    "\"{}\" -> {{ \"{}\" \"{}\" }}",
                     n.hash(),
                     n.left.hash(),
                     n.right.hash()
@@ -151,11 +181,11 @@ impl fmt::Display for Node {
                 write!(f, "{}", n.right)
             }
             Self::Leaf(l) => {
-                write!(f, "\"{}\" [style=filled]\n", l.hash());
-                write!(f, "\"k:{}\\nv:{}\" [style=dashed]\n", l.key, l.value);
-                write!(
+                writeln!(f, "\"{}\" [style=filled]", l.hash());
+                writeln!(f, "\"k:{}\\nv:{}\" [style=dashed]", l.key, l.value);
+                writeln!(
                     f,
-                    "\"{}\" -> {{ \"k:{}\\nv:{}\" }}\n",
+                    "\"{}\" -> {{ \"k:{}\\nv:{}\" }}",
                     l.hash(),
                     l.key,
                     l.value,
@@ -189,7 +219,8 @@ impl Node {
         }
     }
 
-    /// the `siblings` parameter is used to store the siblings while going down to the leaf, if the
+    /// goes down from the current node till finding a leaf or reaching the max_depth. The
+    /// `siblings` parameter is used to store the siblings while going down to the leaf, if the
     /// given parameter is set to `None`, then no siblings are stored. In this way, the same method
     /// `down` can be used by MerkleTree methods `get`, `contains`, `prove` and
     /// `prove_nonexistence`.
@@ -257,11 +288,12 @@ impl Node {
                 // to push both leaves (old-leaf and new-leaf) down the path till their paths
                 // diverge.
 
-                // first check that keys of both leafs are different
+                // first check that keys of both leaves are different
                 // (l=old-leaf, leaf=new-leaf)
                 if l.key == leaf.key {
                     // TODO decide if we want to return an error when trying to add a leaf that
-                    // allready exists, or if we just ignore it
+                    // already exists, or if we just ignore it. For the moment we return the error
+                    // if the key already exists in the leaf.
                     return Err(anyhow!("key already exists"));
                 }
                 let old_leaf = l.clone();
@@ -276,6 +308,9 @@ impl Node {
         Ok(())
     }
 
+    /// goes down through a 'virtual' path till finding a divergence. This method is used for when
+    /// adding a new leaf another already existing leaf is found, so that both leaves (new and old)
+    /// are pushed down the path till their keys diverge.
     fn down_till_divergence(
         &mut self,
         lvl: usize,
@@ -290,7 +325,7 @@ impl Node {
         if let Node::Intermediate(ref mut n) = self {
             // let current_node: Intermediate = *self;
             if old_leaf.path[lvl] != new_leaf.path[lvl] {
-                // reached divergence in next level, set the leafs as childs at the current node
+                // reached divergence in next level, set the leaves as children at the current node
                 if new_leaf.path[lvl] {
                     n.left = Box::new(Node::Leaf(old_leaf));
                     n.right = Box::new(Node::Leaf(new_leaf));
@@ -332,7 +367,6 @@ impl Intermediate {
             right: Box::new(Node::None),
         }
     }
-
     fn compute_hash(&mut self) -> Hash {
         if self.left.clone().is_empty() && self.right.clone().is_empty() {
             self.hash = Some(NULL);
@@ -358,16 +392,14 @@ struct Leaf {
     value: Value,
 }
 impl Leaf {
-    fn new(key: Value, value: Value) -> Self {
-        Self {
+    fn new(max_depth: usize, key: Value, value: Value) -> Result<Self> {
+        Ok(Self {
             hash: None,
-            path: keypath(key),
+            path: keypath(max_depth, key)?,
             key,
             value,
-        }
+        })
     }
-}
-impl Leaf {
     fn compute_hash(&mut self) -> Hash {
         let input: Vec<F> = [self.key.0, self.value.0].concat();
         let h = Hash(PoseidonHash::hash_no_pad(&input).elements);
@@ -379,16 +411,26 @@ impl Leaf {
     }
 }
 
-// TODO 1: think if maybe the length of the returned vector can be <256 (8*bytes.len()), so that
+// NOTE 1: think if maybe the length of the returned vector can be <256 (8*bytes.len()), so that
 // we can do fewer iterations. For example, if the tree.max_depth is set to 20, we just need 20
 // iterations of the loop, not 256.
-// TODO 2: which approach do we take with keys that are longer than the max-depth? ie, what
+// NOTE 2: which approach do we take with keys that are longer than the max-depth? ie, what
 // happens when two keys share the same path for more bits than the max_depth?
-fn keypath(k: Value) -> Vec<bool> {
+/// returns the path of the given key
+fn keypath(max_depth: usize, k: Value) -> Result<Vec<bool>> {
     let bytes = k.to_bytes();
-    (0..8 * bytes.len())
+    if max_depth > 8 * bytes.len() {
+        // note that our current keys are of Value type, which are 4 Goldilocks field elements, ie
+        // ~256 bits, therefore the max_depth can not be bigger than 256.
+        return Err(anyhow!(
+            "key to short (key length: {}) for the max_depth: {}",
+            8 * bytes.len(),
+            max_depth
+        ));
+    }
+    Ok((0..max_depth)
         .map(|n| bytes[n / 8] & (1 << (n % 8)) != 0)
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -405,16 +447,20 @@ pub mod tests {
             }
             kvs.insert(Value::from(i), Value::from(1000 + i));
         }
-        kvs.insert(Value::from(13), Value::from(1013));
+        let key = Value::from(13);
+        let value = Value::from(1013);
+        kvs.insert(key, value);
 
-        let tree = MerkleTree::new(32, &kvs);
-        // it should print the same tree as in
+        let tree = MerkleTree::new(32, &kvs)?;
+        // when printing the tree, it should print the same tree as in
         // https://0xparc.github.io/pod2/merkletree.html#example-2
         println!("{}", tree);
 
         let (v, proof) = tree.prove(&Value::from(13))?;
         assert_eq!(v, Value::from(1013));
         println!("{}", proof);
+
+        MerkleTree::verify(32, tree.root(), &proof, &key, &value)?;
 
         Ok(())
     }
