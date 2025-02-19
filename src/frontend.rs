@@ -172,7 +172,6 @@ impl From<AnchoredKey> for middleware::AnchoredKey {
 pub enum StatementArg {
     Literal(Value),
     Key(AnchoredKey),
-    Statement(Statement),
 }
 
 impl fmt::Display for StatementArg {
@@ -180,7 +179,6 @@ impl fmt::Display for StatementArg {
         match self {
             Self::Literal(v) => write!(f, "{}", v),
             Self::Key(r) => write!(f, "{}.{}", r.0 .1, r.1),
-            Self::Statement(s) => write!(f, "{}", s),
         }
     }
 }
@@ -252,7 +250,6 @@ impl fmt::Display for Statement {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperationArg {
     Statement(Statement),
-    Key(AnchoredKey),
     Literal(Value),
     Entry(String, Value),
 }
@@ -261,7 +258,6 @@ impl fmt::Display for OperationArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OperationArg::Statement(s) => write!(f, "{}", s),
-            OperationArg::Key(k) => write!(f, "{}.{}", k.0 .1, k.1),
             OperationArg::Literal(v) => write!(f, "{}", v),
             OperationArg::Entry(k, v) => write!(f, "({}, {})", k, v),
         }
@@ -295,12 +291,6 @@ impl From<i64> for OperationArg {
 impl From<bool> for OperationArg {
     fn from(b: bool) -> Self {
         Self::Literal(Value::from(b))
-    }
-}
-
-impl From<(Origin, &str)> for OperationArg {
-    fn from((origin, key): (Origin, &str)) -> Self {
-        Self::Key(AnchoredKey(origin, key.to_string()))
     }
 }
 
@@ -403,7 +393,6 @@ impl MainPodBuilder {
                         panic!("Invalid statement argument.");
                     }
                 }
-                OperationArg::Key(k) => st_args.push(StatementArg::Key(k.clone())),
                 OperationArg::Literal(v) => {
                     let k = format!("c{}", self.const_cnt);
                     self.const_cnt += 1;
@@ -548,7 +537,6 @@ impl MainPodCompiler {
     fn compile_op_arg(&self, op_arg: &OperationArg) -> Option<middleware::Statement> {
         match op_arg {
             OperationArg::Statement(s) => Some(self.compile_st(s)),
-            OperationArg::Key(_) => None,
             OperationArg::Literal(_v) => {
                 // OperationArg::Literal is a syntax sugar for the frontend.  This is translated to
                 // a new ValueOf statement and it's key used instead.
@@ -574,7 +562,6 @@ impl MainPodCompiler {
     fn compile_op(&self, op: &Operation) -> middleware::Operation {
         // TODO
         let mop_code: middleware::NativeOperation = op.0.into();
-        println!("{:?}", op);
         let mop_args =
             op.1.iter()
                 .flat_map(|arg| self.compile_op_arg(arg).map(|s| s.try_into().unwrap()))
@@ -653,7 +640,6 @@ pub mod build_utils {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::backends::mock_main::MockProver;
     use crate::backends::mock_signed::MockSigner;
     use crate::examples::{
         great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder,

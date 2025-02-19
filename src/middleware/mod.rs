@@ -439,31 +439,6 @@ pub enum NativeOperation {
     MaxOf = 15,
 }
 
-// #[derive(Clone, Debug, PartialEq, Eq)]
-// pub enum OperationArg {
-//     None,
-//     Statement(Statement),
-//     Key(AnchoredKey),
-// }
-
-// impl OperationArg {
-//     pub fn is_none(&self) -> bool {
-//         matches!(self, Self::None)
-//     }
-//     pub fn statement(&self) -> Result<Statement> {
-//         match self {
-//             Self::Statement(statement) => Ok(statement.clone()),
-//             _ => Err(anyhow!("Operation argument {:?} is not a statement.", self)),
-//         }
-//     }
-//     pub fn key(&self) -> Result<AnchoredKey> {
-//         match self {
-//             Self::Key(ak) => Ok(ak.clone()),
-//             _ => Err(anyhow!("Operation argument {:?} is not a key.", self)),
-//         }
-//     }
-// }
-
 // TODO: Refine this enum.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
