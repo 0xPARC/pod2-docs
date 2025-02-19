@@ -1,8 +1,0 @@
-
-
-Ethdos(x, y, d) = OR ( EthdosBase(x, y, d), EthdosInd(x, y, d) )
-EthdosBase(x, y, d) = AND( Equals(x, y), IsZero(d) )
-IsZero(d) = AND( ... )
-You
-4:15 PM
-ST0 ( *1, *2, *3 ) = OR ( ST1 ( *1, *2, *3), ST2 ( *1, *2, *3) )

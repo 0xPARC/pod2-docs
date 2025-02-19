@@ -1,7 +1,8 @@
 
-# Ethdos custom predicate, using binary AND and OR: example of a direct definition and a recursive batch
+# Ethdos custom predicate, using binary AND and OR: example of a direct definition and a recursive group
 
 ## Direct definition
+(DEPRECATED: All predicates must be defined as part of a group.)
 ```
 eth_friend(src_or, src_key, dst_or, dst_key) = and<
     // there is an attestation pod that's a SIGNATURE POD
@@ -30,7 +31,7 @@ This backend definition is then hashed in the obvious way.
 
 ```
 
-## Recursive batch definition
+## Recursive group definition
 
 ```
 eth_dos_distance(src_or, src_key, dst_or, dst_key, distance_or, distance_key) = or<
@@ -56,7 +57,7 @@ eth_dos_distance_ind_0(src_or, src_key, dst_or, dst_key, distance_or, distance_k
    >
 ```
 
-This batch includes three statements.
+This group includes three statements.
 
 When the definition is serialized for hashing, the statements are renamed to SELF.1, SELF.2, SELF.3.
 
@@ -69,11 +70,11 @@ SELF.1( *1, *2, *3, *4, *5, *6 ) = or<
 ```
 and similarly for the other two definitions.
 
-The above definition is serialized in-circuit and hashed with a zk-friendly hash to generate the "batch hash", a unique cryptographic identifier for the batch.
+The above definition is serialized in-circuit and hashed with a zk-friendly hash to generate the "group hash", a unique cryptographic identifier for the group.
 
-Then the individual statements in the batch are identified as:
+Then the individual statements in the group are identified as:
 ```
-eth_dos_distance = BATCHHASH.1
-eth_dos_distance_base = BATCHHASH.2
-eth_dos_distance_ind = BATCHHASH.3
+eth_dos_distance = groupHASH.1
+eth_dos_distance_base = groupHASH.2
+eth_dos_distance_ind = groupHASH.3
 ```

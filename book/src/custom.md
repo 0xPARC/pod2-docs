@@ -4,14 +4,15 @@ Users of the POD system can introduce _custom predicates_ (previously called _cu
 
 When a custom predicate is introduced in a MainPod, it becomes available for use in that POD and all PODs that inherit[^inherit] from it.
 
-A custom predicate can be defined either _nonrecursively_ or _recursively_ (as part of a "batch"). A nonrecursive custom predicate is defined in terms of previously defined predicates (whether custom or native).  A "batch" of custom predicates can be defined _recursively_: the definition of any custom predicate in the batch can use both previously defined predicates and all the predicates in the batch.
+On the frontend, a custom predicate is defined as a collection of conjunctions and disjunctions of statements.  The definition can be recursive: the definition of a predicate can involve the predicate itself, or the definitions of several predicates can depend on each other.  
+
+At the backend level, every definition of a predicate is either a conjunction or a disjunction of statements.  To convert a frontend custom predicate to the backend, the middleware may need to introduce _sub-predicates_.
+
+On the backend, custom predicates are defined in _groups_.  A group can contain one or more custom predicates and their associated sub-predicates.  Recursive definition is only possible within a group: the definition of a predicate in a group can only depend on previously existing predicates, itself, and other predicates in the same group.
 
 ## Custom predicates and their IDs
 
-A custom predicate, like a built-in predicate, is identified by a _name_ on the front end and an _identifier_ on the back end.  In the non-recursive case, the back-end identifier is defined as a hash of the definition of the custom predicate.
-
-### Recursively defined custom predicates
-
+A custom predicate, like a built-in predicate, is identified by a _name_ on the front end and an _identifier_ on the back end.  The identifier is a cryptographic hash of the definition of the group.
 
 
 [^inherit]: What to call this?  One POD "inherits" from another?

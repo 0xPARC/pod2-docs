@@ -136,3 +136,21 @@ statement is_great_boy(great_boy: PubKey, good_boy_issuers: MerkleTree):
          # good boy 0 != good boy 1
          - neq(friend_pod_0.signer, friend_pod_1.signer)
 ``` 
+
+## Attested GreatBoy
+
+An Attested Great Boy Pod is like a Great Boy Pod, but the names of the signers are revealed.
+
+```
+statement is_great_boy(great_boy: PubKey, friend0: String, friend1: String, good_boy_issuers: MerkleTree):
+   - OR():
+      - AND(friend_pod_0: Pod, friend_pod_1: Pod):
+         # Two good boys consider this user their friend
+         - is_friend(friend_pod_0.signer, great_boy)
+         - is_friend(friend_pod_1.signer, great_boy)
+         # good boy 0 != good boy 1
+         - neq(friend_pod_0.signer, friend_pod_1.signer)
+         # publicize signer names
+         - value_of(friend_pod_0.name, friend0)
+         - value_of(friend_pod_1.name, friend1)
+``` 

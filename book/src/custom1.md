@@ -41,7 +41,7 @@ If you want to apply this deduction rule to prove a `GoodBoy` statement,
 you have to provide the following witnesses in-circuit.
 
 - Copy of the deduction rule
-- Values for *1, *2, *3, *4, *5.  (*1, *2, *4 should be OriginIDs for the three origins; *3 and *5 should be key names.)
+- Values for *1, *2, *3, *4, *5.
 - Copy of the three statements in the deduction rule with *1, *2, *3, *4, *5 filled in
 - Indices of the three statements `ValueOf`, `Contains`, `Equals` in the list of previous statements.
 
