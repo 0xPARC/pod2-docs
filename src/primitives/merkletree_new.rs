@@ -74,21 +74,26 @@ impl MerkleTree {
     /// returns the value at the given key
     pub fn get(&self, key: &Value) -> Result<Value> {
         let path = keypath(self.max_depth, *key)?;
-        let (v, _) = self.root.down(0, self.max_depth, path, None)?;
+        let (k, v) = self.root.down(0, self.max_depth, path, None)?;
+        if &k != key {
+            return Err(anyhow!("key not found"));
+        }
         Ok(v)
     }
 
     /// returns a boolean indicating whether the key exists in the tree
-    pub fn contains(&self, key: &Value) -> bool {
-        // WIP once thiserror is added to pod2, this method is just like `.get` but returning
-        // true/false if the error matches the key-non-existing error returned by `down`
-        // let path = keypath(self.max_depth, *key)?;
-        // match self.root.down(0, self.max_depth, path, None) {
-        //     Ok((_, _)) => true,
-        //     Err("leaf not found")) => false,
-        //     Err(_) => false,
-        // }
-        unimplemented!();
+    pub fn contains(&self, key: &Value) -> Result<bool> {
+        let path = keypath(self.max_depth, *key)?;
+        match self.root.down(0, self.max_depth, path, None) {
+            Ok((k, _)) => {
+                if &k == key {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            Err(_) => Ok(false),
+        }
     }
 
     /// returns a proof of existence, which proves that the given key exists in
@@ -96,13 +101,21 @@ impl MerkleTree {
     /// the `MerkleProof`.
     fn prove(&self, key: &Value) -> Result<(Value, MerkleProof)> {
         let path = keypath(self.max_depth, *key)?;
-        let (v, siblings) = self.root.down(0, self.max_depth, path, Some(Vec::new()))?;
+
+        let mut siblings: Vec<Hash> = Vec::new();
+        let (k, v) = self
+            .root
+            .down(0, self.max_depth, path, Some(&mut siblings))?;
+
+        if &k != key {
+            return Err(anyhow!("key not found"));
+        }
+
         Ok((
             v,
             MerkleProof {
                 existence: true,
-                // `unwrap` is safe since we've called `down` passing a vector
-                siblings: siblings.unwrap(),
+                siblings,
             },
         ))
     }
@@ -224,13 +237,15 @@ impl Node {
     /// given parameter is set to `None`, then no siblings are stored. In this way, the same method
     /// `down` can be used by MerkleTree methods `get`, `contains`, `prove` and
     /// `prove_nonexistence`.
+    /// Be aware that this method will return the found leaf at the given path, which may contain a
+    /// different key and value than the expected one.
     fn down(
         &self,
         lvl: usize,
         max_depth: usize,
         path: Vec<bool>,
-        mut siblings: Option<Vec<Hash>>,
-    ) -> Result<(Value, Option<Vec<Hash>>)> {
+        mut siblings: Option<&mut Vec<Hash>>,
+    ) -> Result<(Value, Value)> {
         if lvl >= max_depth {
             return Err(anyhow!("max depth reached"));
         }
@@ -238,19 +253,19 @@ impl Node {
         match self {
             Self::Intermediate(n) => {
                 if path[lvl] {
-                    if let Some(ref mut s) = siblings {
+                    if let Some(s) = siblings.as_mut() {
                         s.push(n.left.hash());
                     }
                     return n.right.down(lvl + 1, max_depth, path, siblings);
                 } else {
-                    if let Some(ref mut s) = siblings {
+                    if let Some(s) = siblings.as_mut() {
                         s.push(n.right.hash());
                     }
                     return n.left.down(lvl + 1, max_depth, path, siblings);
                 }
             }
             Self::Leaf(l) => {
-                return Ok((l.value, siblings));
+                return Ok((l.key, l.value));
             }
             Self::None => {
                 return Err(anyhow!("leaf not found"));
