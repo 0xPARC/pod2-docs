@@ -2,10 +2,9 @@
 
 [All constant integers in this spec are determined by circuit size and subject to change.]
 
-A _custom predicate_ can be defined in one of two ways:
+On the frontend, a _custom predicate_ is defined as a combination of conjunctions and disjunctions of other custom predicates and possibly the predicate itself.
 
-- Directly, as either the AND or OR of two pre-existing predicates, or
-- Recursively, in a _group_ of up to 10 custom predicates.  Each custom predicate in the group is either the AND or OR of five predicates which are either pre-existing, or defined in the same group.
+On the backend, _custom predicates_ are defined in groups of up to 10.  Each custom predicate in the group is either the AND or OR of five predicates which are either pre-existing, or defined in the same group.
 
 [Note: We could potentially allow the AND or OR of, say, two predicates instead of five.  To make this work, we might need to have access to pod ID as a virtual key, see github issue #60]
 
