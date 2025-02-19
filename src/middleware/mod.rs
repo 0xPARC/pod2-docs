@@ -27,6 +27,8 @@ pub type C = PoseidonGoldilocksConfig;
 /// D defines the extension degree of the field used in the Plonky2 proofs (quadratic extension).
 pub const D: usize = 2;
 
+pub type Entry = (String, Value);
+
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub struct Value(pub [F; 4]);
 
@@ -265,6 +267,93 @@ impl AnchoredKey {
     }
 }
 
+// TODO: Incorporate custom statements into this enum.
+/// Type encapsulating statements with their associated arguments.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Statement {
+    None,
+    ValueOf(AnchoredKey, Value),
+    Equal(AnchoredKey, AnchoredKey),
+    NotEqual(AnchoredKey, AnchoredKey),
+    Gt(AnchoredKey, AnchoredKey),
+    Lt(AnchoredKey, AnchoredKey),
+    Contains(AnchoredKey, AnchoredKey),
+    NotContains(AnchoredKey, AnchoredKey),
+    SumOf(AnchoredKey, AnchoredKey, AnchoredKey),
+    ProductOf(AnchoredKey, AnchoredKey, AnchoredKey),
+    MaxOf(AnchoredKey, AnchoredKey, AnchoredKey),
+}
+
+impl Statement {
+    pub fn is_none(&self) -> bool {
+        self == &Self::None
+    }
+    pub fn code(&self) -> NativeStatement {
+        match self {
+            Self::None => NativeStatement::None,
+            Self::ValueOf(_, _) => NativeStatement::ValueOf,
+            Self::Equal(_, _) => NativeStatement::Equal,
+            Self::NotEqual(_, _) => NativeStatement::NotEqual,
+            Self::Gt(_, _) => NativeStatement::Gt,
+            Self::Lt(_, _) => NativeStatement::Lt,
+            Self::Contains(_, _) => NativeStatement::Contains,
+            Self::NotContains(_, _) => NativeStatement::NotContains,
+            Self::SumOf(_, _, _) => NativeStatement::SumOf,
+            Self::ProductOf(_, _, _) => NativeStatement::ProductOf,
+            Self::MaxOf(_, _, _) => NativeStatement::MaxOf,
+        }
+    }
+    pub fn args(&self) -> Vec<StatementArg> {
+        use StatementArg::*;
+        match self.clone() {
+            Self::None => vec![],
+            Self::ValueOf(ak, v) => vec![Key(ak), Literal(v)],
+            Self::Equal(ak1, ak2) => vec![Key(ak1), Key(ak2)],
+            Self::NotEqual(ak1, ak2) => vec![Key(ak1), Key(ak2)],
+            Self::Gt(ak1, ak2) => vec![Key(ak1), Key(ak2)],
+            Self::Lt(ak1, ak2) => vec![Key(ak1), Key(ak2)],
+            Self::Contains(ak1, ak2) => vec![Key(ak1), Key(ak2)],
+            Self::NotContains(ak1, ak2) => vec![Key(ak1), Key(ak2)],
+            Self::SumOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
+            Self::ProductOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
+            Self::MaxOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
+        }
+    }
+}
+
+impl ToFields for Statement {
+    fn to_fields(self) -> (Vec<F>, usize) {
+        let (native_statement_f, native_statement_f_len) = self.code().to_fields();
+        let (vec_statementarg_f, vec_statementarg_f_len) = self
+            .args()
+            .into_iter()
+            .map(|statement_arg| statement_arg.to_fields())
+            .fold((Vec::new(), 0), |mut acc, (f, l)| {
+                acc.0.extend(f);
+                acc.1 += l;
+                acc
+            });
+        (
+            [native_statement_f, vec_statementarg_f].concat(),
+            native_statement_f_len + vec_statementarg_f_len,
+        )
+    }
+}
+
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} ", self.code())?;
+        for (i, arg) in self.args().iter().enumerate() {
+            if i != 0 {
+                write!(f, " ")?;
+            }
+            write!(f, "{}", arg)?;
+        }
+        Ok(())
+    }
+}
+
+/// Statement argument type. Useful for statement decompositions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatementArg {
     None,
@@ -330,56 +419,6 @@ impl ToFields for StatementArg {
     }
 }
 
-// TODO: Replace this with a more stringly typed enum as in the Devcon implementation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
-
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} ", self.0)?;
-        for (i, arg) in self.1.iter().enumerate() {
-            if !(!f.alternate() && arg.is_none()) {
-                if i != 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", arg)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Statement {
-    pub fn code(&self) -> NativeStatement {
-        self.0
-    }
-    pub fn args(&self) -> &[StatementArg] {
-        &self.1
-    }
-    pub fn is_none(&self) -> bool {
-        matches!(self.0, NativeStatement::None)
-    }
-}
-
-impl ToFields for Statement {
-    fn to_fields(self) -> (Vec<F>, usize) {
-        let (native_statement_f, native_statement_f_len) = self.0.to_fields();
-        let (vec_statementarg_f, vec_statementarg_f_len) = self
-            .1
-            .into_iter()
-            .map(|statement_arg| statement_arg.to_fields())
-            .fold((Vec::new(), 0), |mut acc, (f, l)| {
-                acc.0.extend(f);
-                acc.1 += l;
-                acc
-            });
-        (
-            [native_statement_f, vec_statementarg_f].concat(),
-            native_statement_f_len + vec_statementarg_f_len,
-        )
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeOperation {
     None = 0,
@@ -400,133 +439,172 @@ pub enum NativeOperation {
     MaxOf = 15,
 }
 
+// #[derive(Clone, Debug, PartialEq, Eq)]
+// pub enum OperationArg {
+//     None,
+//     Statement(Statement),
+//     Key(AnchoredKey),
+// }
+
+// impl OperationArg {
+//     pub fn is_none(&self) -> bool {
+//         matches!(self, Self::None)
+//     }
+//     pub fn statement(&self) -> Result<Statement> {
+//         match self {
+//             Self::Statement(statement) => Ok(statement.clone()),
+//             _ => Err(anyhow!("Operation argument {:?} is not a statement.", self)),
+//         }
+//     }
+//     pub fn key(&self) -> Result<AnchoredKey> {
+//         match self {
+//             Self::Key(ak) => Ok(ak.clone()),
+//             _ => Err(anyhow!("Operation argument {:?} is not a key.", self)),
+//         }
+//     }
+// }
+
+// TODO: Refine this enum.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum OperationArg {
+pub enum Operation {
     None,
-    Statement(Statement),
-    Key(AnchoredKey),
+    NewEntry,
+    CopyStatement(Statement),
+    EqualFromEntries(Statement, Statement),
+    NotEqualFromEntries(Statement, Statement),
+    GtFromEntries(Statement, Statement),
+    LtFromEntries(Statement, Statement),
+    TransitiveEqualFromStatements(Statement, Statement),
+    GtToNotEqual(Statement),
+    LtToNotEqual(Statement),
+    ContainsFromEntries(Statement, Statement),
+    NotContainsFromEntries(Statement, Statement),
+    RenameContainedBy(Statement, Statement),
+    SumOf(Statement, Statement, Statement),
+    ProductOf(Statement, Statement, Statement),
+    MaxOf(Statement, Statement, Statement),
 }
-
-impl OperationArg {
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-    pub fn statement(&self) -> Result<Statement> {
-        match self {
-            Self::Statement(statement) => Ok(statement.clone()),
-            _ => Err(anyhow!("Operation argument {:?} is not a statement.", self)),
-        }
-    }
-    pub fn key(&self) -> Result<AnchoredKey> {
-        match self {
-            Self::Key(ak) => Ok(ak.clone()),
-            _ => Err(anyhow!("Operation argument {:?} is not a key.", self)),
-        }
-    }
-}
-
-// TODO: Replace this with a more stringly typed enum as in the Devcon implementation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
 impl Operation {
     pub fn code(&self) -> NativeOperation {
-        self.0
-    }
-    pub fn args(&self) -> &[OperationArg] {
-        &self.1
-    }
-    // TODO: Argument checking.
-    // TODO: Use `Err` for all type mismatches rather than `false`.
-    /// Checks the given operation against a statement.
-    pub fn check(&self, output_statement: Statement) -> Result<bool> {
         use NativeOperation::*;
-        match self.0 {
-            // Nothing to check.
-            None => Ok(output_statement.code() == NativeStatement::None),
-            // Check that the resulting statement is of type `ValueOf`
-            // and its origin is `SELF`.
-            NewEntry =>
-                Ok(output_statement.code() == NativeStatement::ValueOf && output_statement.args()[0].key()?.origin() == SELF)
-            ,
-            // Check that the operation acts on a statement *and* the
-            // output is equal to this statement.
-            CopyStatement => Ok(output_statement == self.args()[0].statement()?)
-            ,
-            EqualFromEntries => {
-                let s1 = self.args()[0].statement()?;
-                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
-                let s2 = self.args()[1].statement()?;
-                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value == s2_value;
-                Ok(statements_equal && output_statement.code() == NativeStatement::Equal && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}
-            ,
-            NotEqualFromEntries => {
-                let s1 = self.args()[0].statement()?;
-                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
-                let s2 = self.args()[1].statement()?;
-                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value != s2_value;
-                Ok(statements_not_equal && output_statement.code() == NativeStatement::NotEqual && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)}                ,
-            GtFromEntries => {
-                let s1 = self.args()[0].statement()?;
-                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
-                let s2 = self.args()[1].statement()?;
-                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value > s2_value;
-                Ok(statements_not_equal && output_statement.code() == NativeStatement::Gt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
-            LtFromEntries => {
-                let s1 = self.args()[0].statement()?;
-                let (s1_key, s1_value) = (s1.args()[0].key()?, s1.args()[1].literal()?);
-                let s2 = self.args()[1].statement()?;
-                let (s2_key, s2_value) = (s2.args()[0].key()?, s2.args()[1].literal()?);
-                let statements_not_equal = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s1_value < s2_value;
-                Ok(statements_not_equal && output_statement.code() == NativeStatement::Lt && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key)},
-            TransitiveEqualFromStatements => {
-                let s1 = self.args()[0].statement()?;
-                let s2 = self.args()[1].statement()?;
-                let key1 = s1.args()[0].key()?;
-                let key2 = s1.args()[1].key()?;
-                let key3 = s2.args()[0].key()?;
-                let key4 = s2.args()[1].key()?;
-                let statements_satisfy_transitivity = s1.code() == NativeStatement::Equal && s2.code() == NativeStatement::Equal && key2 == key3;
-                Ok(statements_satisfy_transitivity && output_statement.code() == NativeStatement::Equal && output_statement.args()[0].key()? == key1 && output_statement.args()[1].key()? == key4)
-            },
-            GtToNotEqual => {
-                let s = self.args()[0].statement()?;
-                let arg_is_gt = s.code() == NativeStatement::Gt;
-                Ok(arg_is_gt && output_statement.code() == NativeStatement::NotEqual && output_statement.args() == s.args())
-            },
-            LtToNotEqual => {
-                let s = self.args()[0].statement()?;
-                let arg_is_lt = s.code() == NativeStatement::Lt;
-                Ok(arg_is_lt && output_statement.code() == NativeStatement::NotEqual && output_statement.args() == s.args())
-            },
-            RenameContainedBy => {
-                let s1 = self.args()[0].statement()?;
-                let s2 = self.args()[1].statement()?;
-                let key1 = s1.args()[0].key()?;
-                let key2 = s1.args()[1].key()?;
-                let key3 = s2.args()[0].key()?;
-                let key4 = s2.args()[1].key()?;
-                let args_satisfy_rename = s1.code() == NativeStatement::Contains && s2.code() == NativeStatement::Equal && key1 == key3;
-                Ok(args_satisfy_rename && output_statement.code() == NativeStatement::Contains && output_statement.args()[0].key()? == key4 && output_statement.args()[1].key()? == key2)
-            },
-            SumOf => {
-                let s1 = self.args()[0].statement()?;
-                let s1_key = s1.args()[0].key()?;
-                let s1_value: i64 = s1.args()[1].literal()?.try_into()?;
-                let s2 = self.args()[1].statement()?;
-                let s2_key = s2.args()[0].key()?;
-                let s2_value:i64 = s2.args()[1].literal()?.try_into()?;
-                let s3 = self.args()[2].statement()?;
-                let s3_key = s3.args()[0].key()?;
-                let s3_value: i64 = s3.args()[1].literal()?.try_into()?;
-                let sum_holds = s1.code() == NativeStatement::ValueOf && s2.code() == NativeStatement::ValueOf && s3.code() == NativeStatement::ValueOf && s1_value == s2_value + s3_value;
-                Ok(sum_holds && output_statement.code() == NativeStatement::SumOf && output_statement.args()[0].key()? == s1_key && output_statement.args()[1].key()? == s2_key && output_statement.args()[2].key()? == s3_key)
-            },
-            // TODO: Remaining ops.
-            _ => Ok(true)
+        match self {
+            Self::None => None,
+            Self::NewEntry => NewEntry,
+            Self::CopyStatement(_) => CopyStatement,
+            Self::EqualFromEntries(_, _) => EqualFromEntries,
+            Self::NotEqualFromEntries(_, _) => NotEqualFromEntries,
+            Self::GtFromEntries(_, _) => GtFromEntries,
+            Self::LtFromEntries(_, _) => LtFromEntries,
+            Self::TransitiveEqualFromStatements(_, _) => TransitiveEqualFromStatements,
+            Self::GtToNotEqual(_) => GtToNotEqual,
+            Self::LtToNotEqual(_) => LtToNotEqual,
+            Self::ContainsFromEntries(_, _) => ContainsFromEntries,
+            Self::NotContainsFromEntries(_, _) => NotContainsFromEntries,
+            Self::RenameContainedBy(_, _) => RenameContainedBy,
+            Self::SumOf(_, _, _) => SumOf,
+            Self::ProductOf(_, _, _) => ProductOf,
+            Self::MaxOf(_, _, _) => MaxOf,
+        }
+    }
+
+    pub fn args(&self) -> Vec<Statement> {
+        match self.clone() {
+            Self::None => vec![],
+            Self::NewEntry => vec![],
+            Self::CopyStatement(s) => vec![s],
+            Self::EqualFromEntries(s1, s2) => vec![s1, s2],
+            Self::NotEqualFromEntries(s1, s2) => vec![s1, s2],
+            Self::GtFromEntries(s1, s2) => vec![s1, s2],
+            Self::LtFromEntries(s1, s2) => vec![s1, s2],
+            Self::TransitiveEqualFromStatements(s1, s2) => vec![s1, s2],
+            Self::GtToNotEqual(s) => vec![s],
+            Self::LtToNotEqual(s) => vec![s],
+            Self::ContainsFromEntries(s1, s2) => vec![s1, s2],
+            Self::NotContainsFromEntries(s1, s2) => vec![s1, s2],
+            Self::RenameContainedBy(s1, s2) => vec![s1, s2],
+            Self::SumOf(s1, s2, s3) => vec![s1, s2, s3],
+            Self::ProductOf(s1, s2, s3) => vec![s1, s2, s3],
+            Self::MaxOf(s1, s2, s3) => vec![s1, s2, s3],
+        }
+    }
+    /// Forms operation from op-code and arguments.
+    pub fn op(op_code: NativeOperation, args: &[Statement]) -> Result<Self> {
+        type NO = NativeOperation;
+        let arg_tup = (
+            args.get(0).cloned(),
+            args.get(1).cloned(),
+            args.get(2).cloned(),
+        );
+        Ok(match (op_code, arg_tup) {
+            (NO::None, (None, None, None)) => Self::None,
+            (NO::NewEntry, (None, None, None)) => Self::NewEntry,
+            (NO::CopyStatement, (Some(s), None, None)) => Self::CopyStatement(s),
+            (NO::EqualFromEntries, (Some(s1), Some(s2), None)) => Self::EqualFromEntries(s1, s2),
+            (NO::NotEqualFromEntries, (Some(s1), Some(s2), None)) => {
+                Self::NotEqualFromEntries(s1, s2)
+            }
+            (NO::GtFromEntries, (Some(s1), Some(s2), None)) => Self::GtFromEntries(s1, s2),
+            (NO::LtFromEntries, (Some(s1), Some(s2), None)) => Self::LtFromEntries(s1, s2),
+            (NO::ContainsFromEntries, (Some(s1), Some(s2), None)) => {
+                Self::ContainsFromEntries(s1, s2)
+            }
+            (NO::NotContainsFromEntries, (Some(s1), Some(s2), None)) => {
+                Self::NotContainsFromEntries(s1, s2)
+            }
+            (NO::RenameContainedBy, (Some(s1), Some(s2), None)) => Self::RenameContainedBy(s1, s2),
+            (NO::SumOf, (Some(s1), Some(s2), Some(s3))) => Self::SumOf(s1, s2, s3),
+            (NO::ProductOf, (Some(s1), Some(s2), Some(s3))) => Self::ProductOf(s1, s2, s3),
+            (NO::MaxOf, (Some(s1), Some(s2), Some(s3))) => Self::MaxOf(s1, s2, s3),
+            _ => Err(anyhow!(
+                "Ill-formed operation {:?} with arguments {:?}.",
+                op_code,
+                args
+            ))?,
+        })
+    }
+    /// Checks the given operation against a statement.
+    pub fn check(&self, output_statement: &Statement) -> Result<bool> {
+        use Statement::*;
+        match (self, output_statement) {
+            (Self::None, None) => Ok(true),
+            (Self::NewEntry, ValueOf(AnchoredKey(pod_id, _), _)) => Ok(pod_id == &SELF),
+            (Self::CopyStatement(s1), s2) => Ok(s1 == s2),
+            (Self::EqualFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), Equal(ak3, ak4)) => {
+                Ok(v1 == v2 && ak3 == ak1 && ak4 == ak2)
+            }
+            (Self::NotEqualFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), NotEqual(ak3, ak4)) => {
+                Ok(v1 != v2 && ak3 == ak1 && ak4 == ak2)
+            }
+            (Self::GtFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), Gt(ak3, ak4)) => {
+                Ok(v1 > v2 && ak3 == ak1 && ak4 == ak2)
+            }
+            (Self::LtFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), Lt(ak3, ak4)) => {
+                Ok(v1 < v2 && ak3 == ak1 && ak4 == ak2)
+            }
+            (
+                Self::TransitiveEqualFromStatements(Equal(ak1, ak2), Equal(ak3, ak4)),
+                Equal(ak5, ak6),
+            ) => Ok(ak2 == ak3 && ak5 == ak1 && ak6 == ak4),
+            (Self::GtToNotEqual(Gt(ak1, ak2)), NotEqual(ak3, ak4)) => Ok(ak1 == ak3 && ak2 == ak4),
+            (Self::LtToNotEqual(Lt(ak1, ak2)), NotEqual(ak3, ak4)) => Ok(ak1 == ak3 && ak2 == ak4),
+            (Self::RenameContainedBy(Contains(ak1, ak2), Equal(ak3, ak4)), Contains(ak5, ak6)) => {
+                Ok(ak1 == ak3 && ak4 == ak5 && ak2 == ak6)
+            }
+            (
+                Self::SumOf(ValueOf(ak1, v1), ValueOf(ak2, v2), ValueOf(ak3, v3)),
+                SumOf(ak4, ak5, ak6),
+            ) => {
+                let v1: i64 = v1.clone().try_into()?;
+                let v2: i64 = v2.clone().try_into()?;
+                let v3: i64 = v3.clone().try_into()?;
+                Ok((v1 == v2 + v3) && ak4 == ak1 && ak5 == ak2 && ak6 == ak3)
+            }
+            _ => Err(anyhow!(
+                "Invalid deduction: {:?} ⇏ {:#}",
+                self,
+                output_statement
+            )),
         }
     }
 }
