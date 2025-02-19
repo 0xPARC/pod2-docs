@@ -86,7 +86,7 @@ Reference(reference_key, key)
 means that the *value* of `reference key` is the *key name* of `key`.
 
 ```
-ValueFromPodKey
+ValueFromPodKey(local_key, origin_id, key)
 ```
 means that the key `local_key` in the local scope has the same value as the key `key` in the scope of the pod `origin_id`.
 
