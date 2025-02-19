@@ -81,15 +81,7 @@ impl Pod for MockSignedPod {
         let id = self.id();
         self.dict
             .iter()
-            .map(|(k, v)| {
-                Statement(
-                    NativeStatement::ValueOf,
-                    vec![
-                        StatementArg::Key(AnchoredKey(id, Hash(k.0))),
-                        StatementArg::Literal(*v),
-                    ],
-                )
-            })
+            .map(|(k, v)| Statement::ValueOf(AnchoredKey(id, Hash(k.0)), *v))
             .collect()
     }
 

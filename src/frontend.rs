@@ -1,7 +1,7 @@
 //! The frontend includes the user-level abstractions and user-friendly types to define and work
 //! with Pods.
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::convert::From;
@@ -77,7 +77,7 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Dictionary(d) => write!(f, "dict:{}", d.commitment()),
             Value::Set(s) => write!(f, "set:{}", s.commitment()),
-        Value::Array(a) => write!(f, "arr:{}", a.commitment()),
+            Value::Array(a) => write!(f, "arr:{}", a.commitment()),
             Value::Raw(v) => write!(f, "{}", v),
         }
     }
@@ -124,7 +124,6 @@ pub struct SignedPod {
     pub pod: Box<dyn middleware::Pod>,
     /// HashMap to store the reverse relation between key strings and key hashes
     pub key_string_map: HashMap<Hash, String>,
-    // TODO: Similar map for hash.
 }
 
 impl fmt::Display for SignedPod {
@@ -163,9 +162,9 @@ impl SignedPod {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnchoredKey(pub Origin, pub String);
 
-impl Into<middleware::AnchoredKey> for AnchoredKey {
-    fn into(self) -> middleware::AnchoredKey {
-        middleware::AnchoredKey(self.0 .1, hash_str(&self.1))
+impl From<AnchoredKey> for middleware::AnchoredKey {
+    fn from(ak: AnchoredKey) -> Self {
+        middleware::AnchoredKey(ak.0 .1, hash_str(&ak.1))
     }
 }
 
@@ -173,6 +172,7 @@ impl Into<middleware::AnchoredKey> for AnchoredKey {
 pub enum StatementArg {
     Literal(Value),
     Key(AnchoredKey),
+    Statement(Statement),
 }
 
 impl fmt::Display for StatementArg {
@@ -180,84 +180,66 @@ impl fmt::Display for StatementArg {
         match self {
             Self::Literal(v) => write!(f, "{}", v),
             Self::Key(r) => write!(f, "{}.{}", r.0 .1, r.1),
+            Self::Statement(s) => write!(f, "{}", s),
         }
     }
 }
 
-// TODO: Incorporate custom statements into this enum.
-/// Type encapsulating statements with their associated arguments.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Statement {
-    None,
-    ValueOf(AnchoredKey, Value),
-    Equal(AnchoredKey, AnchoredKey),
-    NotEqual(AnchoredKey, AnchoredKey),
-    Gt(AnchoredKey, AnchoredKey),
-    Lt(AnchoredKey, AnchoredKey),
-    Contains(AnchoredKey, AnchoredKey),
-    NotContains(AnchoredKey, AnchoredKey),
-    SumOf(AnchoredKey, AnchoredKey, AnchoredKey),
-    ProductOf(AnchoredKey, AnchoredKey, AnchoredKey),
-    MaxOf(AnchoredKey, AnchoredKey, AnchoredKey),
-}
+pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
 
-impl Statement {
-    pub fn code(&self) -> NativeStatement {
-        match self {
-            Self::None => NativeStatement::None,
-            Self::ValueOf(_, _) => NativeStatement::ValueOf,
-            Self::Equal(_, _) => NativeStatement::Equal,
-            Self::NotEqual(_, _) => NativeStatement::NotEqual,
-            Self::Gt(_, _) => NativeStatement::Gt,
-            Self::Lt(_, _) => NativeStatement::Lt,
-            Self::Contains(_, _) => NativeStatement::Contains,
-            Self::NotContains(_, _) => NativeStatement::NotContains,
-            Self::SumOf(_, _, _) => NativeStatement::SumOf,
-            Self::ProductOf(_, _, _) => NativeStatement::ProductOf,
-            Self::MaxOf(_, _, _) => NativeStatement::MaxOf,
-        }
-    }
-    pub fn args(&self) -> Vec<StatementArg> {
-        use StatementArg::*;
-        match self.clone() {
-            Self::None => vec![],
-            Self::ValueOf(ak, v) => vec![Key(ak), Literal(v)],
-            Self::Equal(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::NotEqual(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::Gt(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::Lt(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::Contains(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::NotContains(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::SumOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
-            Self::ProductOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
-            Self::MaxOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
-        }
-    }
-}
-
-impl Into<middleware::Statement> for Statement {
-    fn into(self) -> middleware::Statement {
-        use middleware::Statement::*;
-        match self {
-            Self::None => None,
-            Self::ValueOf(ak, v) => ValueOf(ak.into(), (&v).into()),
-            Self::Equal(ak1, ak2) => Equal(ak1.into(), ak2.into()),
-            Self::NotEqual(ak1, ak2) => NotEqual(ak1.into(), ak2.into()),
-            Self::Gt(ak1, ak2) => Gt(ak1.into(), ak2.into()),
-            Self::Lt(ak1, ak2) => Lt(ak1.into(), ak2.into()),
-            Self::Contains(ak1, ak2) => Contains(ak1.into(), ak2.into()),
-            Self::NotContains(ak1, ak2) => NotContains(ak1.into(), ak2.into()),
-            Self::SumOf(ak1, ak2, ak3) => SumOf(ak1.into(), ak2.into(), ak3.into()),
-            Self::ProductOf(ak1, ak2, ak3) => ProductOf(ak1.into(), ak2.into(), ak3.into()),
-            Self::MaxOf(ak1, ak2, ak3) => MaxOf(ak1.into(), ak2.into(), ak3.into()),
-        }
+impl TryFrom<Statement> for middleware::Statement {
+    type Error = anyhow::Error;
+    fn try_from(s: Statement) -> Result<Self> {
+        type MS = middleware::Statement;
+        type NS = NativeStatement;
+        type SA = StatementArg;
+        let args = (
+            s.1.get(0).cloned(),
+            s.1.get(1).cloned(),
+            s.1.get(2).cloned(),
+        );
+        Ok(match (s.0, args) {
+            (NS::None, (None, None, None)) => MS::None,
+            (NS::ValueOf, (Some(SA::Key(ak)), Some(StatementArg::Literal(v)), None)) => {
+                MS::ValueOf(ak.into(), (&v).into())
+            }
+            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+                MS::Equal(ak1.into(), ak2.into())
+            }
+            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+                MS::NotEqual(ak1.into(), ak2.into())
+            }
+            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+                MS::Gt(ak1.into(), ak2.into())
+            }
+            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+                MS::Lt(ak1.into(), ak2.into())
+            }
+            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+                MS::Contains(ak1.into(), ak2.into())
+            }
+            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+                MS::NotContains(ak1.into(), ak2.into())
+            }
+            (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+                MS::SumOf(ak1.into(), ak2.into(), ak3.into())
+            }
+            (NS::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+                MS::ProductOf(ak1.into(), ak2.into(), ak3.into())
+            }
+            (NS::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+                MS::MaxOf(ak1.into(), ak2.into(), ak3.into())
+            }
+            _ => Err(anyhow!("Ill-formed statement: {}", s))?,
+        })
     }
 }
 
 impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} ", self.code())?;
-        for (i, arg) in self.args().iter().enumerate() {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?} ", self.0)?;
+        for (i, arg) in self.1.iter().enumerate() {
             if i != 0 {
                 write!(f, " ")?;
             }
@@ -269,17 +251,19 @@ impl fmt::Display for Statement {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperationArg {
-    Entry(String, Value),
     Statement(Statement),
+    Key(AnchoredKey),
     Literal(Value),
+    Entry(String, Value),
 }
 
 impl fmt::Display for OperationArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OperationArg::Entry(k, v) => write!(f, "{}: {}", k, v),
             OperationArg::Statement(s) => write!(f, "{}", s),
+            OperationArg::Key(k) => write!(f, "{}.{}", k.0 .1, k.1),
             OperationArg::Literal(v) => write!(f, "{}", v),
+            OperationArg::Entry(k, v) => write!(f, "({}, {})", k, v),
         }
     }
 }
@@ -320,93 +304,27 @@ impl From<(Origin, &str)> for OperationArg {
     }
 }
 
-impl TryFrom<(&SignedPod, &str)> for OperationArg {
-    type Error = Error;
-    fn try_from((pod, key): (&SignedPod, &str)) -> Result<Self> {
-        let value = pod.kvs().get(&hash_str(key)).cloned().ok_or(anyhow!(
-            "POD with ID {} does not contain value corresponding to key {}.",
-            pod.id(),
-            key
-        ))?;
-        Ok(Self::Statement(Statement::ValueOf(
-            AnchoredKey(pod.origin(), key.to_string()),
-            Value::Raw(value),
-        )))
+impl From<(&SignedPod, &str)> for OperationArg {
+    fn from((pod, key): (&SignedPod, &str)) -> Self {
+        // TODO: Actual value, TryFrom.
+        let value = pod.kvs().get(&hash_str(key)).unwrap().clone();
+        Self::Statement(Statement(
+            NativeStatement::ValueOf,
+            vec![
+                StatementArg::Key(AnchoredKey(pod.origin(), key.to_string())),
+                StatementArg::Literal(Value::Raw(value)),
+            ],
+        ))
     }
 }
 
-// TODO: Refine this enum.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Operation {
-    None,
-    NewEntry(String, Value),
-    CopyStatement(Statement),
-    EqualFromEntries(OperationArg, OperationArg),
-    NotEqualFromEntries(OperationArg, OperationArg),
-    GtFromEntries(OperationArg, OperationArg),
-    LtFromEntries(OperationArg, OperationArg),
-    TransitiveEqualFromStatements(Statement, Statement),
-    GtToNotEqual(Statement),
-    LtToNotEqual(Statement),
-    ContainsFromEntries(OperationArg, OperationArg),
-    NotContainsFromEntries(OperationArg, OperationArg),
-    RenameContainedBy(Statement, Statement),
-    SumOf(OperationArg, OperationArg, OperationArg),
-    ProductOf(OperationArg, OperationArg, OperationArg),
-    MaxOf(OperationArg, OperationArg, OperationArg),
-}
-
-impl Operation {
-    pub fn code(&self) -> NativeOperation {
-        use NativeOperation::*;
-        match self {
-            Self::None => None,
-            Self::NewEntry(_, _) => NewEntry,
-            Self::CopyStatement(_) => CopyStatement,
-            Self::EqualFromEntries(_, _) => EqualFromEntries,
-            Self::NotEqualFromEntries(_, _) => NotEqualFromEntries,
-            Self::GtFromEntries(_, _) => GtFromEntries,
-            Self::LtFromEntries(_, _) => LtFromEntries,
-            Self::TransitiveEqualFromStatements(_, _) => TransitiveEqualFromStatements,
-            Self::GtToNotEqual(_) => GtToNotEqual,
-            Self::LtToNotEqual(_) => LtToNotEqual,
-            Self::ContainsFromEntries(_, _) => ContainsFromEntries,
-            Self::NotContainsFromEntries(_, _) => NotContainsFromEntries,
-            Self::RenameContainedBy(_, _) => RenameContainedBy,
-            Self::SumOf(_, _, _) => SumOf,
-            Self::ProductOf(_, _, _) => ProductOf,
-            Self::MaxOf(_, _, _) => MaxOf,
-        }
-    }
-    pub fn args(&self) -> Vec<OperationArg> {
-        use OperationArg::*;
-        match self.clone() {
-            Self::None => vec![],
-            Self::NewEntry(key, value) => vec![Entry(key, value)],
-            Self::CopyStatement(s) => vec![Statement(s.into())],
-            Self::EqualFromEntries(s1, s2) => vec![s1, s2],
-            Self::NotEqualFromEntries(s1, s2) => vec![s1, s2],
-            Self::GtFromEntries(s1, s2) => vec![s1, s2],
-            Self::LtFromEntries(s1, s2) => vec![s1, s2],
-            Self::TransitiveEqualFromStatements(s1, s2) => {
-                vec![Statement(s1.into()), Statement(s2.into())]
-            }
-            Self::GtToNotEqual(s) => vec![Statement(s.into())],
-            Self::LtToNotEqual(s) => vec![Statement(s.into())],
-            Self::ContainsFromEntries(s1, s2) => vec![s1, s2],
-            Self::NotContainsFromEntries(s1, s2) => vec![s1, s2],
-            Self::RenameContainedBy(s1, s2) => vec![Statement(s1.into()), Statement(s2.into())],
-            Self::SumOf(s1, s2, s3) => vec![s1, s2, s3],
-            Self::ProductOf(s1, s2, s3) => vec![s1, s2, s3],
-            Self::MaxOf(s1, s2, s3) => vec![s1, s2, s3],
-        }
-    }
-}
+pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
 
 impl fmt::Display for Operation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?} ", self.code())?;
-        for (i, arg) in self.args().iter().enumerate() {
+        write!(f, "{:?} ", self.0)?;
+        for (i, arg) in self.1.iter().enumerate() {
             if i != 0 {
                 write!(f, " ")?;
             }
@@ -473,85 +391,80 @@ impl MainPodBuilder {
         self.operations.push(op);
     }
 
-    pub fn pub_op(&mut self, op: Operation) -> Statement {
-        self.op(true, op)
-    }
-
     /// Convert [OperationArg]s to [StatementArg]s for the operations that work with entries
-    fn op_args_entries(&mut self, public: bool, args: &mut [OperationArg]) -> Vec<AnchoredKey> {
+    fn op_args_entries(&mut self, public: bool, args: &mut [OperationArg]) -> Vec<StatementArg> {
         let mut st_args = Vec::new();
         for arg in args.iter_mut() {
             match arg {
-                OperationArg::Statement(s) => match s {
-                    Statement::ValueOf(k, _) => st_args.push(k.clone()),
-                    _ => panic!("Invalid statement argument."),
-                },
+                OperationArg::Statement(s) => {
+                    if s.0 == NativeStatement::ValueOf {
+                        st_args.push(s.1[0].clone())
+                    } else {
+                        panic!("Invalid statement argument.");
+                    }
+                }
+                OperationArg::Key(k) => st_args.push(StatementArg::Key(k.clone())),
                 OperationArg::Literal(v) => {
                     let k = format!("c{}", self.const_cnt);
                     self.const_cnt += 1;
-                    let value_of_st = self.op(public, Operation::NewEntry(k.clone(), v.clone()));
-                    *arg = OperationArg::Statement(Statement::ValueOf(
-                        AnchoredKey(Origin(PodClass::Main, SELF), k.clone()),
-                        v.clone(),
-                    ));
-                    if let StatementArg::Key(k) = value_of_st.args()[0].clone() {
-                        st_args.push(k);
-                    } else {
-                        unreachable!("Unexpected missing anchored key argument!");
-                    }
+                    let value_of_st = self.op(
+                        public,
+                        Operation(
+                            NativeOperation::NewEntry,
+                            vec![OperationArg::Entry(k.clone(), v.clone())],
+                        ),
+                    );
+                    *arg = OperationArg::Statement(value_of_st.clone());
+                    st_args.push(value_of_st.1[0].clone())
                 }
-                // TODO: Remove!
-                _ => {
-                    unreachable!("Argument to operation on entries cannot be of type Entry!")
+                OperationArg::Entry(k, v) => {
+                    st_args.push(StatementArg::Key(AnchoredKey(
+                        Origin(PodClass::Main, SELF),
+                        k.clone(),
+                    )));
+                    st_args.push(StatementArg::Literal(v.clone()))
                 }
             };
         }
         st_args
     }
 
-    pub fn op(&mut self, public: bool, op: Operation) -> Statement {
-        type O = Operation;
-        use Statement::*;
-        let mut args = op.args();
+    pub fn pub_op(&mut self, op: Operation) -> Statement {
+        self.op(true, op)
+    }
+
+    pub fn op(&mut self, public: bool, mut op: Operation) -> Statement {
+        use NativeOperation::*;
+        let Operation(op_type, ref mut args) = op;
         // TODO: argument type checking
-        let st = match &op {
-            O::None => None,
-            O::NewEntry(key, value) => ValueOf(
-                AnchoredKey(Origin(PodClass::Main, SELF), key.clone()),
-                value.clone(),
+        let st = match op_type {
+            None => Statement(NativeStatement::None, vec![]),
+            NewEntry => Statement(NativeStatement::ValueOf, self.op_args_entries(public, args)),
+            CopyStatement => todo!(),
+            EqualFromEntries => {
+                Statement(NativeStatement::Equal, self.op_args_entries(public, args))
+            }
+            NotEqualFromEntries => Statement(
+                NativeStatement::NotEqual,
+                self.op_args_entries(public, args),
             ),
-            O::CopyStatement(s) => s.clone(),
-            O::EqualFromEntries(_, _) => {
-                let args = self.op_args_entries(public, &mut args);
-                Equal(args[0].clone(), args[1].clone())
-            }
-            O::NotEqualFromEntries(_, _) => {
-                let args = self.op_args_entries(public, &mut args);
-                NotEqual(args[0].clone(), args[1].clone())
-            }
-            O::GtFromEntries(_, _) => {
-                let args = self.op_args_entries(public, &mut args);
-                Gt(args[0].clone(), args[1].clone())
-            }
-            O::LtFromEntries(_, _) => {
-                let args = self.op_args_entries(public, &mut args);
-                Lt(args[0].clone(), args[1].clone())
-            }
-            O::TransitiveEqualFromStatements(_, _) => todo!(),
-            O::GtToNotEqual(_) => todo!(),
-            O::LtToNotEqual(_) => todo!(),
-            O::ContainsFromEntries(_, _) => {
-                let args = self.op_args_entries(public, &mut args);
-                Contains(args[0].clone(), args[1].clone())
-            }
-            O::NotContainsFromEntries(_, _) => {
-                let args = self.op_args_entries(public, &mut args);
-                NotContains(args[0].clone(), args[1].clone())
-            }
-            O::RenameContainedBy(_, _) => todo!(),
-            O::SumOf(_, _, _) => todo!(),
-            O::ProductOf(_, _, _) => todo!(),
-            O::MaxOf(_, _, _) => todo!(),
+            GtFromEntries => Statement(NativeStatement::Gt, self.op_args_entries(public, args)),
+            LtFromEntries => Statement(NativeStatement::Lt, self.op_args_entries(public, args)),
+            TransitiveEqualFromStatements => todo!(),
+            GtToNotEqual => todo!(),
+            LtToNotEqual => todo!(),
+            ContainsFromEntries => Statement(
+                NativeStatement::Contains,
+                self.op_args_entries(public, args),
+            ),
+            NotContainsFromEntries => Statement(
+                NativeStatement::NotContains,
+                self.op_args_entries(public, args),
+            ),
+            RenameContainedBy => todo!(),
+            SumOf => todo!(),
+            ProductOf => todo!(),
+            MaxOf => todo!(),
         };
         self.operations.push(op);
         if public {
@@ -632,88 +545,41 @@ impl MainPodCompiler {
         self.operations.push(op);
     }
 
+    fn compile_op_arg(&self, op_arg: &OperationArg) -> Option<middleware::Statement> {
+        match op_arg {
+            OperationArg::Statement(s) => Some(self.compile_st(s)),
+            OperationArg::Key(_) => None,
+            OperationArg::Literal(_v) => {
+                // OperationArg::Literal is a syntax sugar for the frontend.  This is translated to
+                // a new ValueOf statement and it's key used instead.
+                unreachable!()
+            }
+            OperationArg::Entry(_k, _v) => {
+                // OperationArg::Entry is only used in the frontend.  The (key, value) will only
+                // appear in the ValueOf statement in the backend.  This is because a new ValueOf
+                // statement doesn't have any requirement on the key and value.
+                None
+            }
+        }
+    }
+
     fn compile_anchored_key(key: &AnchoredKey) -> middleware::AnchoredKey {
         middleware::AnchoredKey(key.0 .1, hash_str(&key.1))
     }
 
     fn compile_st(&self, st: &Statement) -> middleware::Statement {
-        use middleware::Statement::*;
-        type S = Statement;
-        match st {
-            S::None => None,
-            S::ValueOf(ak, v) => ValueOf(ak.clone().into(), v.into()),
-            S::Equal(ak1, ak2) => Equal(ak1.clone().into(), ak2.clone().into()),
-            S::NotEqual(ak1, ak2) => NotEqual(ak1.clone().into(), ak2.clone().into()),
-            S::Gt(ak1, ak2) => Gt(ak1.clone().into(), ak2.clone().into()),
-            S::Lt(ak1, ak2) => Lt(ak1.clone().into(), ak2.clone().into()),
-            S::Contains(ak1, ak2) => Contains(ak1.clone().into(), ak2.clone().into()),
-            S::NotContains(ak1, ak2) => NotContains(ak1.clone().into(), ak2.clone().into()),
-            S::SumOf(ak1, ak2, ak3) => {
-                SumOf(ak1.clone().into(), ak2.clone().into(), ak3.clone().into())
-            }
-            S::ProductOf(ak1, ak2, ak3) => {
-                ProductOf(ak1.clone().into(), ak2.clone().into(), ak3.clone().into())
-            }
-            S::MaxOf(ak1, ak2, ak3) => {
-                MaxOf(ak1.clone().into(), ak2.clone().into(), ak3.clone().into())
-            }
-        }
+        st.clone().try_into().unwrap()
     }
 
     fn compile_op(&self, op: &Operation) -> middleware::Operation {
-        use middleware::Operation::*;
-        type O = Operation;
-        type Arg = OperationArg;
-        match op {
-            O::None => None,
-            // OperationArg::Entry is only used in the frontend.  The (key, value) will only
-            // appear in the ValueOf statement in the backend.  This is because a new ValueOf
-            // statement doesn't have any requirement on the key and value.
-            O::NewEntry(_, _) => NewEntry,
-            O::CopyStatement(s) => CopyStatement(self.compile_st(s)),
-            O::EqualFromEntries(Arg::Statement(s1), Arg::Statement(s2)) => {
-                EqualFromEntries(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::NotEqualFromEntries(Arg::Statement(s1), Arg::Statement(s2)) => {
-                NotEqualFromEntries(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::GtFromEntries(Arg::Statement(s1), Arg::Statement(s2)) => {
-                GtFromEntries(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::LtFromEntries(Arg::Statement(s1), Arg::Statement(s2)) => {
-                LtFromEntries(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::TransitiveEqualFromStatements(s1, s2) => {
-                TransitiveEqualFromStatements(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::GtToNotEqual(s) => GtToNotEqual(self.compile_st(s)),
-            O::LtToNotEqual(s) => LtToNotEqual(self.compile_st(s)),
-            O::ContainsFromEntries(Arg::Statement(s1), Arg::Statement(s2)) => {
-                ContainsFromEntries(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::NotContainsFromEntries(Arg::Statement(s1), Arg::Statement(s2)) => {
-                NotContainsFromEntries(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::RenameContainedBy(s1, s2) => {
-                RenameContainedBy(self.compile_st(s1), self.compile_st(s2))
-            }
-            O::SumOf(Arg::Statement(s1), Arg::Statement(s2), Arg::Statement(s3)) => SumOf(
-                self.compile_st(s1),
-                self.compile_st(s2),
-                self.compile_st(s3),
-            ),
-            O::ProductOf(Arg::Statement(s1), Arg::Statement(s2), Arg::Statement(s3)) => ProductOf(
-                self.compile_st(s1),
-                self.compile_st(s2),
-                self.compile_st(s3),
-            ),
-            O::MaxOf(Arg::Statement(s1), Arg::Statement(s2), Arg::Statement(s3)) => MaxOf(
-                self.compile_st(s1),
-                self.compile_st(s2),
-                self.compile_st(s3),
-            ),
-            _ => panic!("Ill-formed operation: {:?}", op),
-        }
+        // TODO
+        let mop_code: middleware::NativeOperation = op.0.into();
+        println!("{:?}", op);
+        let mop_args =
+            op.1.iter()
+                .flat_map(|arg| self.compile_op_arg(arg).map(|s| s.try_into().unwrap()))
+                .collect::<Vec<middleware::Statement>>();
+        middleware::Operation::op(mop_code, &mop_args).unwrap()
     }
 
     fn compile_st_op(&mut self, st: &Statement, op: &Operation) {
@@ -789,7 +655,10 @@ pub mod tests {
     use super::*;
     use crate::backends::mock_main::MockProver;
     use crate::backends::mock_signed::MockSigner;
-    use crate::examples::{great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
+    use crate::examples::{
+        great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder,
+        zu_kyc_sign_pod_builders,
+    };
 
     #[test]
     fn test_front_zu_kyc() -> Result<()> {

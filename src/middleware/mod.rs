@@ -582,6 +582,16 @@ impl Operation {
             (Self::LtFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), Lt(ak3, ak4)) => {
                 Ok(v1 < v2 && ak3 == ak1 && ak4 == ak2)
             }
+            (Self::ContainsFromEntries(_, _), Contains(_, _)) =>
+            /* TODO */
+            {
+                Ok(true)
+            }
+            (Self::NotContainsFromEntries(_, _), NotContains(_, _)) =>
+            /* TODO */
+            {
+                Ok(true)
+            }
             (
                 Self::TransitiveEqualFromStatements(Equal(ak1, ak2), Equal(ak3, ak4)),
                 Equal(ak5, ak6),
@@ -617,11 +627,14 @@ pub trait Pod: fmt::Debug + DynClone {
     fn kvs(&self) -> HashMap<AnchoredKey, Value> {
         self.pub_statements()
             .into_iter()
-            .filter_map(|st| match st.0 {
-                NativeStatement::ValueOf => Some((
-                    st.1[0].key().expect("key"),
-                    st.1[1].literal().expect("literal"),
-                )),
+            .filter_map(|st| match st.code() {
+                NativeStatement::ValueOf => {
+                    let args = st.args();
+                    Some((
+                        args[0].key().expect("key"),
+                        args[1].literal().expect("literal"),
+                    ))
+                }
                 _ => None,
             })
             .collect()

@@ -1,6 +1,6 @@
 use crate::middleware::{
     self, hash_str, AnchoredKey, Hash, MainPodInputs, NativeOperation, NativeStatement, NonePod,
-    Params, Pod, PodId, PodProver, Statement, StatementArg, ToFields, KEY_TYPE, SELF,
+    Params, Pod, PodId, PodProver, StatementArg, ToFields, KEY_TYPE, SELF,
 };
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
@@ -96,26 +96,26 @@ impl ToFields for Statement {
     }
 }
 
-impl TryInto<middleware::Statement> for Statement {
+impl TryFrom<Statement> for middleware::Statement {
     type Error = anyhow::Error;
-    fn try_into(self) -> Result<middleware::Statement> {
+    fn try_from(s: Statement) -> Result<Self> {
         type S = middleware::Statement;
         type NS = NativeStatement;
         type SA = StatementArg;
         let args = (
-            self.1.get(0).cloned(),
-            self.1.get(1).cloned(),
-            self.1.get(2).cloned(),
+            s.1.get(0).cloned(),
+            s.1.get(1).cloned(),
+            s.1.get(2).cloned(),
         );
-        Ok(match (self.0, args) {
+        Ok(match (s.0, args) {
             (NS::None, _) => S::None,
-            (NS::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), None)) => S::ValueOf(ak, v),
-            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => S::Equal(ak1, ak2),
-            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => S::NotEqual(ak1, ak2),
-            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => S::Gt(ak1, ak2),
-            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => S::Lt(ak1, ak2),
-            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => S::Contains(ak1, ak2),
-            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+            (NS::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), _)) => S::ValueOf(ak, v),
+            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Equal(ak1, ak2),
+            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::NotEqual(ak1, ak2),
+            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Gt(ak1, ak2),
+            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Lt(ak1, ak2),
+            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Contains(ak1, ak2),
+            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => {
                 S::NotContains(ak1, ak2)
             }
             (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
@@ -127,7 +127,7 @@ impl TryInto<middleware::Statement> for Statement {
             (NS::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
                 S::MaxOf(ak1, ak2, ak3)
             }
-            _ => Err(anyhow!("Malformed statement expression {}", self))?,
+            _ => Err(anyhow!("Ill-formed statement expression {:?}", s))?,
         })
     }
 }
@@ -361,13 +361,22 @@ impl MockMainPod {
         statements
     }
 
-    fn find_op_arg(statements: &[Statement], op_arg: &middleware::Statement) -> Result<OperationArg, OperationArgError> {
-        statements
-            .iter()
-            .enumerate()
-            .find_map(|(i, s)| (s == &op_arg.clone().into()))
-            .map(OperationArg::Index)
-                    .ok_or(OperationArgError::StatementNotFound)
+    fn find_op_arg(
+        statements: &[Statement],
+        op_arg: &middleware::Statement,
+    ) -> Result<OperationArg, OperationArgError> {
+        match op_arg {
+            middleware::Statement::None => Ok(OperationArg::None),
+            _ => statements
+                .iter()
+                .enumerate()
+                // TODO
+                .find_map(|(i, s)| {
+                    (&middleware::Statement::try_from(s.clone()).unwrap() == op_arg).then_some(i)
+                })
+                .map(OperationArg::Index)
+                .ok_or(OperationArgError::StatementNotFound),
+        }
     }
 
     fn process_private_statements_operations(
@@ -413,7 +422,7 @@ impl MockMainPod {
                 Operation(
                     NativeOperation::CopyStatement,
                     // TODO
-                    vec![Self::find_op_arg(statements, &mid_arg.try_into().unwrap())],
+                    vec![Self::find_op_arg(statements, &mid_arg.try_into().unwrap())?],
                 )
             };
             fill_pad(&mut op.1, OperationArg::None, params.max_operation_args);
@@ -596,7 +605,10 @@ impl Pod for MockMainPod {
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use crate::examples::{great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
+    use crate::examples::{
+        great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder,
+        zu_kyc_sign_pod_builders,
+    };
     use crate::middleware;
 
     #[test]
@@ -650,6 +662,6 @@ pub mod tests {
         let pod = proof_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
 
         println!("{}", pod);
-        assert_eq!(pod.verify(), true); 
+        assert_eq!(pod.verify(), true);
     }
 }
