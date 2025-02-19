@@ -58,13 +58,19 @@ impl Operation {
             .1
             .iter()
             .flat_map(|arg| match arg {
-                OperationArg::None => vec![],
-                OperationArg::Index(i) => {
-                    vec![statements[*i].clone().try_into()]
-                }
+                OperationArg::None => None,
+                OperationArg::Index(i) => Some(statements[*i].clone().try_into()),
             })
             .collect::<Result<Vec<crate::middleware::Statement>>>()?;
         middleware::Operation::op(self.0, &deref_args)
+    }
+    /// Argument method. Trailing Nones are filtered out.
+    pub fn args(&self) -> Vec<OperationArg> {
+        let maybe_last_arg_index = (0..self.1.len()).rev().find(|i| !self.1[*i].is_none());
+        match maybe_last_arg_index {
+            None => vec![],
+            Some(i) => self.1[0..i + 1].to_vec(),
+        }
     }
 }
 
@@ -74,6 +80,14 @@ pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
 impl Statement {
     pub fn is_none(&self) -> bool {
         self.0 == NativeStatement::None
+    }
+    /// Argument method. Trailing Nones are filtered out.
+    pub fn args(&self) -> Vec<StatementArg> {
+        let maybe_last_arg_index = (0..self.1.len()).rev().find(|i| !self.1[*i].is_none());
+        match maybe_last_arg_index {
+            None => vec![],
+            Some(i) => self.1[0..i + 1].to_vec(),
+        }
     }
 }
 
@@ -102,29 +116,30 @@ impl TryFrom<Statement> for middleware::Statement {
         type S = middleware::Statement;
         type NS = NativeStatement;
         type SA = StatementArg;
+        let proper_args = s.args();
         let args = (
-            s.1.get(0).cloned(),
-            s.1.get(1).cloned(),
-            s.1.get(2).cloned(),
+            proper_args.get(0).cloned(),
+            proper_args.get(1).cloned(),
+            proper_args.get(2).cloned(),
         );
-        Ok(match (s.0, args) {
-            (NS::None, _) => S::None,
-            (NS::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), _)) => S::ValueOf(ak, v),
-            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Equal(ak1, ak2),
-            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::NotEqual(ak1, ak2),
-            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Gt(ak1, ak2),
-            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Lt(ak1, ak2),
-            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => S::Contains(ak1, ak2),
-            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _)) => {
+        Ok(match (s.0, args, proper_args.len()) {
+            (NS::None, _, 0) => S::None,
+            (NS::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), _), 2) => S::ValueOf(ak, v),
+            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Equal(ak1, ak2),
+            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::NotEqual(ak1, ak2),
+            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Gt(ak1, ak2),
+            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Lt(ak1, ak2),
+            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Contains(ak1, ak2),
+            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => {
                 S::NotContains(ak1, ak2)
             }
-            (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+            (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
                 S::SumOf(ak1, ak2, ak3)
             }
-            (NS::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+            (NS::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
                 S::ProductOf(ak1, ak2, ak3)
             }
-            (NS::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+            (NS::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
                 S::MaxOf(ak1, ak2, ak3)
             }
             _ => Err(anyhow!("Ill-formed statement expression {:?}", s))?,

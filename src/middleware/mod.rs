@@ -511,26 +511,28 @@ impl Operation {
             args.get(1).cloned(),
             args.get(2).cloned(),
         );
-        Ok(match (op_code, arg_tup) {
-            (NO::None, (None, None, None)) => Self::None,
-            (NO::NewEntry, (None, None, None)) => Self::NewEntry,
-            (NO::CopyStatement, (Some(s), None, None)) => Self::CopyStatement(s),
-            (NO::EqualFromEntries, (Some(s1), Some(s2), None)) => Self::EqualFromEntries(s1, s2),
-            (NO::NotEqualFromEntries, (Some(s1), Some(s2), None)) => {
+        Ok(match (op_code, arg_tup, args.len()) {
+            (NO::None, (None, None, None), 0) => Self::None,
+            (NO::NewEntry, (None, None, None), 0) => Self::NewEntry,
+            (NO::CopyStatement, (Some(s), None, None), 1) => Self::CopyStatement(s),
+            (NO::EqualFromEntries, (Some(s1), Some(s2), None), 2) => Self::EqualFromEntries(s1, s2),
+            (NO::NotEqualFromEntries, (Some(s1), Some(s2), None), 2) => {
                 Self::NotEqualFromEntries(s1, s2)
             }
-            (NO::GtFromEntries, (Some(s1), Some(s2), None)) => Self::GtFromEntries(s1, s2),
-            (NO::LtFromEntries, (Some(s1), Some(s2), None)) => Self::LtFromEntries(s1, s2),
-            (NO::ContainsFromEntries, (Some(s1), Some(s2), None)) => {
+            (NO::GtFromEntries, (Some(s1), Some(s2), None), 2) => Self::GtFromEntries(s1, s2),
+            (NO::LtFromEntries, (Some(s1), Some(s2), None), 2) => Self::LtFromEntries(s1, s2),
+            (NO::ContainsFromEntries, (Some(s1), Some(s2), None), 2) => {
                 Self::ContainsFromEntries(s1, s2)
             }
-            (NO::NotContainsFromEntries, (Some(s1), Some(s2), None)) => {
+            (NO::NotContainsFromEntries, (Some(s1), Some(s2), None), 2) => {
                 Self::NotContainsFromEntries(s1, s2)
             }
-            (NO::RenameContainedBy, (Some(s1), Some(s2), None)) => Self::RenameContainedBy(s1, s2),
-            (NO::SumOf, (Some(s1), Some(s2), Some(s3))) => Self::SumOf(s1, s2, s3),
-            (NO::ProductOf, (Some(s1), Some(s2), Some(s3))) => Self::ProductOf(s1, s2, s3),
-            (NO::MaxOf, (Some(s1), Some(s2), Some(s3))) => Self::MaxOf(s1, s2, s3),
+            (NO::RenameContainedBy, (Some(s1), Some(s2), None), 2) => {
+                Self::RenameContainedBy(s1, s2)
+            }
+            (NO::SumOf, (Some(s1), Some(s2), Some(s3)), 3) => Self::SumOf(s1, s2, s3),
+            (NO::ProductOf, (Some(s1), Some(s2), Some(s3)), 3) => Self::ProductOf(s1, s2, s3),
+            (NO::MaxOf, (Some(s1), Some(s2), Some(s3)), 3) => Self::MaxOf(s1, s2, s3),
             _ => Err(anyhow!(
                 "Ill-formed operation {:?} with arguments {:?}.",
                 op_code,
