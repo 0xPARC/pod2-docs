@@ -154,3 +154,69 @@ statement is_great_boy(great_boy: PubKey, friend0: String, friend1: String, good
          - value_of(friend_pod_0.name, friend0)
          - value_of(friend_pod_1.name, friend1)
 ``` 
+
+To produce a Great Boy Pod, you need two Friend Pods, `friend_pod0` and `friend_pod1`, each of which reveals its `signer`.
+
+## Tracking PodIDs: Posts and comments
+
+The goal of this example is to model a social network, where posts and comments are pods.
+
+A Post is a signature pod with the following fields:
+```
+content: String
+poster: String
+signer: PubKey
+timestamp: Int
+```
+
+A Comment is a signature pod with the following fields:
+```
+content: String
+referenced_post: PodID
+signer: PubKey
+timestamp: Int
+```
+
+A post is popular if it has at least two comments from different signers.
+
+```
+statement is_popular(post: PodID):
+   - AND():
+      - IsEqual(comment1.referenced_post, post)
+      - IsEqual(comment2.referenced_post, post)
+      - NotEqual(comment1.signer, comment2.signer)
+```
+
+## Multiple people over 18
+
+Suppose I want to prove that two different people are over 18, using the custom predicate `over_18`.
+```
+statement over_18(age):
+   - AND():
+      - ValueOf(eighteen, 18)
+      - GEq(age, eighteen)
+```
+
+With wildcards:
+```
+statement over_18(*1, *2):
+   - AND():
+      - ValueOf(*3, *4, 18)
+      - GEq(*1, *2, *3, *4)
+```
+
+Maybe I have two input pods `gov_id1` and `gov_id2`, and I want to prove that these pods refer to two different people, both of whom are over 18.  So in my public output statements, I want to have:
+```
+IsUnequal(gov_id1.name, gov_id2.name)
+over_18(gov_id1.age)
+over_18(gov_id2.age).
+```
+
+I would prove this with the following sequence of deductions:
+| Statement | Reason |
+| --- | --- |
+| ValueOf(local_eighteen, 18) | (new entry) |
+| over_18(gov_id1.age) | over_18, <br> *1 = _SELF, <br> *2 = "local_eighteen", <br> *3 = gov_id1, <br> *4 = "age" |
+| over_18(gov_id1.age) | over_18, <br> *1 = _SELF, <br> *2 = "local_eighteen", <br> *3 = gov_id2, <br> *4 = "age" |
+| IsUnequal(gov_id1.name, gov_id2.name) | (is unequal from entries) |
+
