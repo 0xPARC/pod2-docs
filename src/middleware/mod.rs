@@ -1,18 +1,20 @@
 //! The middleware includes the type definitions and the traits used to connect the frontend and
 //! the backend.
 
+mod custom;
 mod operation;
 mod statement;
+pub use custom::*;
+pub use operation::*;
+pub use statement::*;
 
 use anyhow::{anyhow, Error, Result};
 use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
-pub use operation::*;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
-pub use statement::*;
 use std::any::Any;
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;

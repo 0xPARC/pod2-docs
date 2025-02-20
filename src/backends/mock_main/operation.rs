@@ -1,10 +1,8 @@
+use anyhow::Result;
 use std::fmt;
 
-use anyhow::Result;
-
-use crate::middleware::{self, NativeOperation};
-
 use super::Statement;
+use crate::middleware::{self, NativeOperation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperationArg {
@@ -17,23 +15,6 @@ impl OperationArg {
         matches!(self, OperationArg::None)
     }
 }
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum OperationArgError {
-    KeyNotFound,
-    StatementNotFound,
-}
-
-impl std::fmt::Display for OperationArgError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OperationArgError::KeyNotFound => write!(f, "Key not found"),
-            OperationArgError::StatementNotFound => write!(f, "Statement not found"),
-        }
-    }
-}
-
-impl std::error::Error for OperationArgError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);

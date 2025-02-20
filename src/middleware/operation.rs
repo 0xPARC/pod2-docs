@@ -1,7 +1,7 @@
-use crate::middleware::{AnchoredKey, SELF};
 use anyhow::{anyhow, Result};
 
 use super::Statement;
+use crate::middleware::{AnchoredKey, SELF};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeOperation {

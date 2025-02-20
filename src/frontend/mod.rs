@@ -1,9 +1,6 @@
 //! The frontend includes the user-level abstractions and user-friendly types to define and work
 //! with Pods.
 
-mod operation;
-mod statement;
-
 use anyhow::Result;
 use itertools::Itertools;
 use std::collections::HashMap;
@@ -16,6 +13,9 @@ use crate::middleware::{
     hash_str, Hash, MainPodInputs, NativeOperation, NativePredicate, Params, PodId, PodProver,
     PodSigner, SELF,
 };
+
+mod operation;
+mod statement;
 pub use operation::*;
 pub use statement::*;
 

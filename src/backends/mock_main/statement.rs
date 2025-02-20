@@ -1,6 +1,5 @@
-use std::fmt;
-
 use anyhow::{anyhow, Result};
+use std::fmt;
 
 use crate::middleware::{self, NativePredicate, StatementArg, ToFields};
 
