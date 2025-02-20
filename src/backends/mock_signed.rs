@@ -1,6 +1,6 @@
 use crate::middleware::{
-    containers::Dictionary, hash_str, AnchoredKey, Hash, NativeStatement, Params, Pod, PodId,
-    PodSigner, PodType, Statement, StatementArg, Value, KEY_SIGNER, KEY_TYPE,
+    containers::Dictionary, hash_str, AnchoredKey, Hash, Params, Pod, PodId, PodSigner, PodType,
+    Statement, Value, KEY_SIGNER, KEY_TYPE,
 };
 use crate::primitives::merkletree::MerkleTree;
 use anyhow::Result;

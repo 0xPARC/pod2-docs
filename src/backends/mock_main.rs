@@ -7,7 +7,6 @@ use itertools::Itertools;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::Hasher;
 use std::any::Any;
-use std::error::Error;
 use std::fmt;
 
 pub const VALUE_TYPE: &str = "MockMainPOD";
@@ -64,14 +63,6 @@ impl Operation {
             .collect::<Result<Vec<crate::middleware::Statement>>>()?;
         middleware::Operation::op(self.0, &deref_args)
     }
-    /// Argument method. Trailing Nones are filtered out.
-    pub fn args(&self) -> Vec<OperationArg> {
-        let maybe_last_arg_index = (0..self.1.len()).rev().find(|i| !self.1[*i].is_none());
-        match maybe_last_arg_index {
-            None => vec![],
-            Some(i) => self.1[0..i + 1].to_vec(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,13 +115,17 @@ impl TryFrom<Statement> for middleware::Statement {
         );
         Ok(match (s.0, args, proper_args.len()) {
             (NS::None, _, 0) => S::None,
-            (NS::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), _), 2) => S::ValueOf(ak, v),
-            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Equal(ak1, ak2),
-            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::NotEqual(ak1, ak2),
-            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Gt(ak1, ak2),
-            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Lt(ak1, ak2),
-            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => S::Contains(ak1, ak2),
-            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), _), 2) => {
+            (NS::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), None), 2) => S::ValueOf(ak, v),
+            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Equal(ak1, ak2),
+            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
+                S::NotEqual(ak1, ak2)
+            }
+            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Gt(ak1, ak2),
+            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Lt(ak1, ak2),
+            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
+                S::Contains(ak1, ak2)
+            }
+            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
                 S::NotContains(ak1, ak2)
             }
             (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
@@ -276,11 +271,6 @@ fn fill_pad<T: Clone>(v: &mut Vec<T>, pad_value: T, len: usize) {
     }
 }
 
-fn pad<T: Clone>(v: Vec<T>, pad_value: T, len: usize) -> Vec<T> {
-    let v_len = v.len();
-    [v, (v_len..len).map(|_| pad_value.clone()).collect()].concat()
-}
-
 impl MockMainPod {
     fn offset_input_signed_pods(&self) -> usize {
         0
@@ -295,14 +285,11 @@ impl MockMainPod {
     fn offset_public_statements(&self) -> usize {
         self.offset_input_statements() + self.params.max_priv_statements()
     }
-    fn pad_statement(params: &Params, s: Statement) -> Statement {
-        Statement(s.0, pad(s.1, StatementArg::None, params.max_statement_args))
+    fn pad_statement(params: &Params, s: &mut Statement) {
+        fill_pad(&mut s.1, StatementArg::None, params.max_statement_args)
     }
-    fn pad_operation(params: &Params, op: Operation) -> Operation {
-        Operation(
-            op.0,
-            pad(op.1, OperationArg::None, params.max_operation_args),
-        )
+    fn pad_operation(params: &Params, op: &mut Operation) {
+        fill_pad(&mut op.1, OperationArg::None, params.max_operation_args)
     }
 
     fn layout_statements(params: &Params, inputs: &MainPodInputs) -> Vec<Statement> {
@@ -317,12 +304,16 @@ impl MockMainPod {
                 .get(i)
                 .map(|p| *p)
                 .unwrap_or(&none_sig_pod);
-            // TODO
             let sts = pod.pub_statements();
             assert!(sts.len() <= params.max_signed_pod_values);
             for j in 0..params.max_signed_pod_values {
-                let mut st = sts.get(j).unwrap_or(&middleware::Statement::None).clone();
-                statements.push(Self::pad_statement(params, st.into()));
+                let mut st = sts
+                    .get(j)
+                    .unwrap_or(&middleware::Statement::None)
+                    .clone()
+                    .into();
+                Self::pad_statement(params, &mut st);
+                statements.push(st);
             }
         }
 
@@ -338,8 +329,13 @@ impl MockMainPod {
             let sts = pod.pub_statements();
             assert!(sts.len() <= params.max_public_statements);
             for j in 0..params.max_public_statements {
-                let mut st = sts.get(j).unwrap_or(&middleware::Statement::None).clone();
-                statements.push(Self::pad_statement(params, st.into()));
+                let mut st = sts
+                    .get(j)
+                    .unwrap_or(&middleware::Statement::None)
+                    .clone()
+                    .into();
+                Self::pad_statement(params, &mut st);
+                statements.push(st);
             }
         }
 
@@ -350,27 +346,31 @@ impl MockMainPod {
                 .statements
                 .get(i)
                 .unwrap_or(&middleware::Statement::None)
-                .clone();
-            statements.push(Self::pad_statement(params, st.into()));
+                .clone()
+                .into();
+            Self::pad_statement(params, &mut st);
+            statements.push(st);
         }
 
         // Public statements
         assert!(inputs.public_statements.len() < params.max_public_statements);
-        statements.push(Self::pad_statement(
-            params,
-            middleware::Statement::ValueOf(
-                AnchoredKey(SELF, hash_str(KEY_TYPE)),
-                middleware::Value(hash_str(VALUE_TYPE).0),
-            )
-            .into(),
-        ));
+        let mut type_st = middleware::Statement::ValueOf(
+            AnchoredKey(SELF, hash_str(KEY_TYPE)),
+            middleware::Value(hash_str(VALUE_TYPE).0),
+        )
+        .into();
+        Self::pad_statement(params, &mut type_st);
+        statements.push(type_st);
+
         for i in 0..(params.max_public_statements - 1) {
-            let st = inputs
+            let mut st = inputs
                 .public_statements
                 .get(i)
                 .unwrap_or(&middleware::Statement::None)
-                .clone();
-            statements.push(Self::pad_statement(params, st.into()));
+                .clone()
+                .into();
+            Self::pad_statement(params, &mut st);
+            statements.push(st);
         }
 
         statements
@@ -385,8 +385,8 @@ impl MockMainPod {
             _ => statements
                 .iter()
                 .enumerate()
-                // TODO
                 .find_map(|(i, s)| {
+                    // TODO: Error handling
                     (&middleware::Statement::try_from(s.clone()).unwrap() == op_arg).then_some(i)
                 })
                 .map(OperationArg::Index)
@@ -399,21 +399,18 @@ impl MockMainPod {
         statements: &[Statement],
         input_operations: &[middleware::Operation],
     ) -> Result<Vec<Operation>, OperationArgError> {
-        let op_none = Self::operation_none(params);
-
         let mut operations = Vec::new();
         for i in 0..params.max_priv_statements() {
             let op = input_operations
                 .get(i)
                 .unwrap_or(&middleware::Operation::None)
                 .clone();
-            let mut mid_args = op.args();
-            Self::pad_operation_args(params, &mut mid_args);
-            let mut args = Vec::with_capacity(mid_args.len());
-            for mid_arg in &mid_args {
-                let op_arg = Self::find_op_arg(statements, mid_arg)?;
-                args.push(op_arg)
-            }
+            let mid_args = op.args();
+            let mut args = mid_args
+                .iter()
+                .map(|mid_arg| Self::find_op_arg(statements, mid_arg))
+                .collect::<Result<Vec<_>, OperationArgError>>()?;
+            Self::pad_operation_args(params, &mut args);
             operations.push(Operation(op.code(), args));
         }
         Ok(operations)
@@ -468,7 +465,11 @@ impl MockMainPod {
             .statements
             .iter()
             .cloned()
-            .map(|s| Self::pad_statement(params, s.into()))
+            .map(|s| {
+                let mut s = s.into();
+                Self::pad_statement(params, &mut s);
+                s
+            })
             .collect_vec();
         let public_statements =
             statements[statements.len() - params.max_public_statements..].to_vec();
@@ -495,15 +496,17 @@ impl MockMainPod {
     }
 
     fn operation_none(params: &Params) -> Operation {
-        Self::pad_operation(params, Operation(NativeOperation::None, vec![]))
+        let mut op = Operation(NativeOperation::None, vec![]);
+        fill_pad(&mut op.1, OperationArg::None, params.max_operation_args);
+        op
     }
 
     fn pad_statement_args(params: &Params, args: &mut Vec<StatementArg>) {
         fill_pad(args, StatementArg::None, params.max_statement_args)
     }
 
-    fn pad_operation_args(params: &Params, args: &mut Vec<middleware::Statement>) {
-        fill_pad(args, middleware::Statement::None, params.max_operation_args)
+    fn pad_operation_args(params: &Params, args: &mut Vec<OperationArg>) {
+        fill_pad(args, OperationArg::None, params.max_operation_args)
     }
 }
 
@@ -556,7 +559,7 @@ impl Pod for MockMainPod {
                         s,
                     )
                 })
-                .filter(|(i, s)| s.0 == NativeStatement::ValueOf)
+                .filter(|(_, s)| s.0 == NativeStatement::ValueOf)
                 .flat_map(|(i, s)| {
                     if let StatementArg::Key(ak) = &s.1[0] {
                         vec![(i, ak.1, ak.0)]

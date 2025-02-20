@@ -604,14 +604,8 @@ pub trait Pod: fmt::Debug + DynClone {
     fn kvs(&self) -> HashMap<AnchoredKey, Value> {
         self.pub_statements()
             .into_iter()
-            .filter_map(|st| match st.code() {
-                NativeStatement::ValueOf => {
-                    let args = st.args();
-                    Some((
-                        args[0].key().expect("key"),
-                        args[1].literal().expect("literal"),
-                    ))
-                }
+            .filter_map(|st| match st {
+                Statement::ValueOf(ak, v) => Some((ak, v)),
                 _ => None,
             })
             .collect()

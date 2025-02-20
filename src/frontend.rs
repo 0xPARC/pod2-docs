@@ -551,10 +551,6 @@ impl MainPodCompiler {
         }
     }
 
-    fn compile_anchored_key(key: &AnchoredKey) -> middleware::AnchoredKey {
-        middleware::AnchoredKey(key.0 .1, hash_str(&key.1))
-    }
-
     fn compile_st(&self, st: &Statement) -> middleware::Statement {
         st.clone().try_into().unwrap()
     }
