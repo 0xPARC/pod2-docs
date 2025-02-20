@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
 
+use crate::constants::MAX_DEPTH;
 use crate::middleware::{
     containers::Dictionary, hash_str, AnchoredKey, Hash, Params, Pod, PodId, PodSigner, PodType,
     Statement, Value, KEY_SIGNER, KEY_TYPE,
@@ -19,7 +20,7 @@ impl PodSigner for MockSigner {
         kvs.insert(hash_str(&KEY_SIGNER), Value(pk_hash.0));
         kvs.insert(hash_str(&KEY_TYPE), Value::from(PodType::MockSigned));
 
-        let dict = Dictionary::new(&kvs);
+        let dict = Dictionary::new(&kvs)?;
         let id = PodId(dict.commitment());
         let signature = format!("{}_signed_by_{}", id, pk_hash);
         Ok(Box::new(MockSignedPod {
@@ -49,13 +50,17 @@ impl Pod for MockSignedPod {
         }
 
         // Verify id
-        let mt = MerkleTree::new(
+        let mt = match MerkleTree::new(
+            MAX_DEPTH,
             &self
                 .dict
                 .iter()
                 .map(|(&k, &v)| (k, v))
                 .collect::<HashMap<Value, Value>>(),
-        );
+        ) {
+            Ok(mt) => mt,
+            Err(_) => return false,
+        };
         let id = PodId(mt.root());
         if id != self.id {
             return false;
@@ -93,14 +98,16 @@ impl Pod for MockSignedPod {
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use crate::frontend;
-    use crate::middleware::{self, F, NULL};
     use plonky2::field::types::Field;
     use std::iter;
 
+    use super::*;
+    use crate::constants::MAX_DEPTH;
+    use crate::frontend;
+    use crate::middleware::{self, F, NULL};
+
     #[test]
-    fn test_mock_signed_0() {
+    fn test_mock_signed_0() -> Result<()> {
         let params = middleware::Params::default();
         let mut pod = frontend::SignedPodBuilder::new(&params);
         pod.insert("idNumber", "4242424242");
@@ -131,7 +138,7 @@ pub mod tests {
             .map(|(AnchoredKey(_, k), v)| (Value(k.0), v))
             .chain(iter::once(bad_kv))
             .collect::<HashMap<Value, Value>>();
-        let bad_mt = MerkleTree::new(&bad_kvs_mt);
+        let bad_mt = MerkleTree::new(MAX_DEPTH, &bad_kvs_mt)?;
         bad_pod.dict.mt = bad_mt;
         assert_eq!(bad_pod.verify(), false);
 
@@ -143,8 +150,10 @@ pub mod tests {
             .map(|(AnchoredKey(_, k), v)| (Value(k.0), v))
             .chain(iter::once(bad_kv))
             .collect::<HashMap<Value, Value>>();
-        let bad_mt = MerkleTree::new(&bad_kvs_mt);
+        let bad_mt = MerkleTree::new(MAX_DEPTH, &bad_kvs_mt)?;
         bad_pod.dict.mt = bad_mt;
         assert_eq!(bad_pod.verify(), false);
+
+        Ok(())
     }
 }

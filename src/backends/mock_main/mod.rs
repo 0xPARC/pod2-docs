@@ -485,7 +485,7 @@ pub mod tests {
             pk: "ZooDeel".into(),
         };
         let pay_stub_pod = pay_stub_builder.sign(&mut signer)?;
-        let kyc_builder = zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod);
+        let kyc_builder = zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod)?;
 
         let mut prover = MockProver {};
         let kyc_pod = kyc_builder.prove(&mut prover)?;
@@ -501,7 +501,7 @@ pub mod tests {
 
     #[test]
     fn test_mock_main_great_boy() -> Result<()> {
-        let great_boy_builder = great_boy_pod_full_flow();
+        let great_boy_builder = great_boy_pod_full_flow()?;
 
         let mut prover = MockProver {};
         let great_boy_pod = great_boy_builder.prove(&mut prover)?;
@@ -520,7 +520,7 @@ pub mod tests {
 
     #[test]
     fn test_mock_main_tickets() -> Result<()> {
-        let tickets_builder = tickets_pod_full_flow();
+        let tickets_builder = tickets_pod_full_flow()?;
         let mut prover = MockProver {};
         let proof_pod = tickets_builder.prove(&mut prover)?;
         let pod = proof_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
