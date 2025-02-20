@@ -510,7 +510,7 @@ pub mod tests {
         let pay_stub = pay_stub.sign(&mut signer).unwrap();
         println!("{}", pay_stub);
 
-        let kyc = zu_kyc_pod_builder(&params, &gov_id, &pay_stub);
+        let kyc = zu_kyc_pod_builder(&params, &gov_id, &pay_stub)?;
         println!("{}", kyc);
 
         // TODO: prove kyc with MockProver and print it
@@ -520,7 +520,7 @@ pub mod tests {
 
     #[test]
     fn test_front_great_boy() -> Result<()> {
-        let great_boy = great_boy_pod_full_flow();
+        let great_boy = great_boy_pod_full_flow()?;
         println!("{}", great_boy);
 
         // TODO: prove kyc with MockProver and print it
@@ -530,7 +530,7 @@ pub mod tests {
 
     #[test]
     fn test_front_tickets() -> Result<()> {
-        let builder = tickets_pod_full_flow();
+        let builder = tickets_pod_full_flow()?;
         println!("{}", builder);
 
         Ok(())

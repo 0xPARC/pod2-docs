@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::collections::HashMap;
 
 use crate::backends::mock_signed::MockSigner;
@@ -24,8 +25,8 @@ pub fn zu_kyc_pod_builder(
     params: &Params,
     gov_id: &SignedPod,
     pay_stub: &SignedPod,
-) -> MainPodBuilder {
-    let sanction_list = Value::Dictionary(Dictionary::new(&HashMap::new())); // empty dictionary
+) -> Result<MainPodBuilder> {
+    let sanction_list = Value::Dictionary(Dictionary::new(&HashMap::new())?); // empty dictionary
     let now_minus_18y: i64 = 1169909388;
     let now_minus_1y: i64 = 1706367566;
 
@@ -41,7 +42,7 @@ pub fn zu_kyc_pod_builder(
     ));
     kyc.pub_op(op!(eq, (pay_stub, "startDate"), now_minus_1y));
 
-    kyc
+    Ok(kyc)
 }
 
 // GreatBoy
@@ -130,7 +131,7 @@ pub fn great_boy_pod_builder(
     great_boy
 }
 
-pub fn great_boy_pod_full_flow() -> MainPodBuilder {
+pub fn great_boy_pod_full_flow() -> Result<MainPodBuilder> {
     let params = Params {
         max_input_signed_pods: 6,
         max_statements: 100,
@@ -179,8 +180,8 @@ pub fn great_boy_pod_full_flow() -> MainPodBuilder {
     alice_friend_pods.push(friend.sign(&mut bob_signer).unwrap());
     alice_friend_pods.push(friend.sign(&mut charlie_signer).unwrap());
 
-    let good_boy_issuers_dict = Value::Dictionary(Dictionary::new(&HashMap::new())); // empty
-    great_boy_pod_builder(
+    let good_boy_issuers_dict = Value::Dictionary(Dictionary::new(&HashMap::new())?); // empty
+    Ok(great_boy_pod_builder(
         &params,
         [
             &bob_good_boys[0],
@@ -191,7 +192,7 @@ pub fn great_boy_pod_full_flow() -> MainPodBuilder {
         [&alice_friend_pods[0], &alice_friend_pods[1]],
         &good_boy_issuers_dict,
         alice,
-    )
+    ))
 }
 
 // Tickets
@@ -229,15 +230,15 @@ pub fn tickets_pod_builder(
     builder
 }
 
-pub fn tickets_pod_full_flow() -> MainPodBuilder {
+pub fn tickets_pod_full_flow() -> Result<MainPodBuilder> {
     let params = Params::default();
     let builder = tickets_sign_pod_builder(&params);
     let signed_pod = builder.sign(&mut MockSigner { pk: "test".into() }).unwrap();
-    tickets_pod_builder(
+    Ok(tickets_pod_builder(
         &params,
         &signed_pod,
         123,
         true,
-        &Value::Dictionary(Dictionary::new(&HashMap::new())),
-    )
+        &Value::Dictionary(Dictionary::new(&HashMap::new())?),
+    ))
 }
