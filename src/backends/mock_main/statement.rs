@@ -1,15 +1,14 @@
+use anyhow::{anyhow, Result};
 use std::fmt;
 
-use anyhow::{anyhow, Result};
-
-use crate::middleware::{self, NativeStatement, StatementArg, ToFields};
+use crate::middleware::{self, NativePredicate, StatementArg, ToFields};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
+pub struct Statement(pub NativePredicate, pub Vec<StatementArg>);
 
 impl Statement {
     pub fn is_none(&self) -> bool {
-        self.0 == NativeStatement::None
+        self.0 == NativePredicate::None
     }
     /// Argument method. Trailing Nones are filtered out.
     pub fn args(&self) -> Vec<StatementArg> {
@@ -44,7 +43,7 @@ impl TryFrom<Statement> for middleware::Statement {
     type Error = anyhow::Error;
     fn try_from(s: Statement) -> Result<Self> {
         type S = middleware::Statement;
-        type NS = NativeStatement;
+        type NP = NativePredicate;
         type SA = StatementArg;
         let proper_args = s.args();
         let args = (
@@ -53,27 +52,27 @@ impl TryFrom<Statement> for middleware::Statement {
             proper_args.get(2).cloned(),
         );
         Ok(match (s.0, args, proper_args.len()) {
-            (NS::None, _, 0) => S::None,
-            (NS::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), None), 2) => S::ValueOf(ak, v),
-            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Equal(ak1, ak2),
-            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
+            (NP::None, _, 0) => S::None,
+            (NP::ValueOf, (Some(SA::Key(ak)), Some(SA::Literal(v)), None), 2) => S::ValueOf(ak, v),
+            (NP::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Equal(ak1, ak2),
+            (NP::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
                 S::NotEqual(ak1, ak2)
             }
-            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Gt(ak1, ak2),
-            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Lt(ak1, ak2),
-            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
+            (NP::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Gt(ak1, ak2),
+            (NP::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => S::Lt(ak1, ak2),
+            (NP::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
                 S::Contains(ak1, ak2)
             }
-            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
+            (NP::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None), 2) => {
                 S::NotContains(ak1, ak2)
             }
-            (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
+            (NP::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
                 S::SumOf(ak1, ak2, ak3)
             }
-            (NS::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
+            (NP::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
                 S::ProductOf(ak1, ak2, ak3)
             }
-            (NS::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
+            (NP::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3))), 3) => {
                 S::MaxOf(ak1, ak2, ak3)
             }
             _ => Err(anyhow!("Ill-formed statement expression {:?}", s))?,

@@ -1,8 +1,7 @@
 use std::fmt;
 
-use crate::middleware::{hash_str, NativeOperation, NativeStatement};
-
 use super::{AnchoredKey, SignedPod, Statement, StatementArg, Value};
+use crate::middleware::{hash_str, NativeOperation, NativePredicate};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperationArg {
@@ -56,7 +55,7 @@ impl From<(&SignedPod, &str)> for OperationArg {
         // TODO: Actual value, TryFrom.
         let value = pod.kvs().get(&hash_str(key)).unwrap().clone();
         Self::Statement(Statement(
-            NativeStatement::ValueOf,
+            NativePredicate::ValueOf,
             vec![
                 StatementArg::Key(AnchoredKey(pod.origin(), key.to_string())),
                 StatementArg::Literal(Value::Raw(value)),

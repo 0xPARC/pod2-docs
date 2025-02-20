@@ -10,7 +10,7 @@ pub const KEY_TYPE: &str = "_type";
 pub const STATEMENT_ARG_F_LEN: usize = 8;
 
 #[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
-pub enum NativeStatement {
+pub enum NativePredicate {
     None = 0,
     ValueOf = 1,
     Equal = 2,
@@ -24,7 +24,7 @@ pub enum NativeStatement {
     MaxOf = 10,
 }
 
-impl ToFields for NativeStatement {
+impl ToFields for NativePredicate {
     fn to_fields(self) -> (Vec<F>, usize) {
         (vec![F::from_canonical_u64(self as u64)], 1)
     }
@@ -51,19 +51,19 @@ impl Statement {
     pub fn is_none(&self) -> bool {
         self == &Self::None
     }
-    pub fn code(&self) -> NativeStatement {
+    pub fn code(&self) -> NativePredicate {
         match self {
-            Self::None => NativeStatement::None,
-            Self::ValueOf(_, _) => NativeStatement::ValueOf,
-            Self::Equal(_, _) => NativeStatement::Equal,
-            Self::NotEqual(_, _) => NativeStatement::NotEqual,
-            Self::Gt(_, _) => NativeStatement::Gt,
-            Self::Lt(_, _) => NativeStatement::Lt,
-            Self::Contains(_, _) => NativeStatement::Contains,
-            Self::NotContains(_, _) => NativeStatement::NotContains,
-            Self::SumOf(_, _, _) => NativeStatement::SumOf,
-            Self::ProductOf(_, _, _) => NativeStatement::ProductOf,
-            Self::MaxOf(_, _, _) => NativeStatement::MaxOf,
+            Self::None => NativePredicate::None,
+            Self::ValueOf(_, _) => NativePredicate::ValueOf,
+            Self::Equal(_, _) => NativePredicate::Equal,
+            Self::NotEqual(_, _) => NativePredicate::NotEqual,
+            Self::Gt(_, _) => NativePredicate::Gt,
+            Self::Lt(_, _) => NativePredicate::Lt,
+            Self::Contains(_, _) => NativePredicate::Contains,
+            Self::NotContains(_, _) => NativePredicate::NotContains,
+            Self::SumOf(_, _, _) => NativePredicate::SumOf,
+            Self::ProductOf(_, _, _) => NativePredicate::ProductOf,
+            Self::MaxOf(_, _, _) => NativePredicate::MaxOf,
         }
     }
     pub fn args(&self) -> Vec<StatementArg> {

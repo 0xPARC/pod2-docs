@@ -1,18 +1,20 @@
 //! The middleware includes the type definitions and the traits used to connect the frontend and
 //! the backend.
 
+mod custom;
 mod operation;
 mod statement;
+pub use custom::*;
+pub use operation::*;
+pub use statement::*;
 
 use anyhow::{anyhow, Error, Result};
 use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
-pub use operation::*;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
-pub use statement::*;
 use std::any::Any;
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;
@@ -201,7 +203,8 @@ impl From<PodType> for Value {
 pub fn hash_str(s: &str) -> Hash {
     let mut input = s.as_bytes().to_vec();
     input.push(1); // padding
-                   // Merge 7 bytes into 1 field, because the field is slightly below 64 bits
+
+    // Merge 7 bytes into 1 field, because the field is slightly below 64 bits
     let input: Vec<F> = input
         .chunks(7)
         .map(|bytes| {

@@ -1,10 +1,8 @@
+use anyhow::{anyhow, Result};
 use std::fmt;
 
-use anyhow::{anyhow, Result};
-
-use crate::middleware::{self, NativeStatement};
-
 use super::{AnchoredKey, Value};
+use crate::middleware::{self, NativePredicate};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatementArg {
@@ -22,13 +20,13 @@ impl fmt::Display for StatementArg {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
+pub struct Statement(pub NativePredicate, pub Vec<StatementArg>);
 
 impl TryFrom<Statement> for middleware::Statement {
     type Error = anyhow::Error;
     fn try_from(s: Statement) -> Result<Self> {
         type MS = middleware::Statement;
-        type NS = NativeStatement;
+        type NP = NativePredicate;
         type SA = StatementArg;
         let args = (
             s.1.get(0).cloned(),
@@ -36,35 +34,35 @@ impl TryFrom<Statement> for middleware::Statement {
             s.1.get(2).cloned(),
         );
         Ok(match (s.0, args) {
-            (NS::None, (None, None, None)) => MS::None,
-            (NS::ValueOf, (Some(SA::Key(ak)), Some(StatementArg::Literal(v)), None)) => {
+            (NP::None, (None, None, None)) => MS::None,
+            (NP::ValueOf, (Some(SA::Key(ak)), Some(StatementArg::Literal(v)), None)) => {
                 MS::ValueOf(ak.into(), (&v).into())
             }
-            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+            (NP::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
                 MS::Equal(ak1.into(), ak2.into())
             }
-            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+            (NP::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
                 MS::NotEqual(ak1.into(), ak2.into())
             }
-            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+            (NP::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
                 MS::Gt(ak1.into(), ak2.into())
             }
-            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+            (NP::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
                 MS::Lt(ak1.into(), ak2.into())
             }
-            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+            (NP::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
                 MS::Contains(ak1.into(), ak2.into())
             }
-            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
+            (NP::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
                 MS::NotContains(ak1.into(), ak2.into())
             }
-            (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+            (NP::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
                 MS::SumOf(ak1.into(), ak2.into(), ak3.into())
             }
-            (NS::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+            (NP::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
                 MS::ProductOf(ak1.into(), ak2.into(), ak3.into())
             }
-            (NS::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
+            (NP::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
                 MS::MaxOf(ak1.into(), ak2.into(), ak3.into())
             }
             _ => Err(anyhow!("Ill-formed statement: {}", s))?,

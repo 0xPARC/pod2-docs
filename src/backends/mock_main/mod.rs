@@ -1,18 +1,19 @@
-mod operation;
-mod statement;
-
-use crate::middleware::{
-    self, hash_str, AnchoredKey, Hash, MainPodInputs, NativeOperation, NativeStatement, NonePod,
-    Params, Pod, PodId, PodProver, StatementArg, ToFields, KEY_TYPE, SELF,
-};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
-pub use operation::*;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::Hasher;
-pub use statement::*;
 use std::any::Any;
 use std::fmt;
+
+use crate::middleware::{
+    self, hash_str, AnchoredKey, Hash, MainPodInputs, NativeOperation, NativePredicate, NonePod,
+    Params, Pod, PodId, PodProver, StatementArg, ToFields, KEY_TYPE, SELF,
+};
+
+mod operation;
+mod statement;
+pub use operation::*;
+pub use statement::*;
 
 pub const VALUE_TYPE: &str = "MockMainPOD";
 
@@ -222,18 +223,17 @@ impl MockMainPod {
     fn find_op_arg(
         statements: &[Statement],
         op_arg: &middleware::Statement,
-    ) -> Result<OperationArg, OperationArgError> {
+    ) -> Result<OperationArg> {
         match op_arg {
             middleware::Statement::None => Ok(OperationArg::None),
             _ => statements
                 .iter()
                 .enumerate()
                 .find_map(|(i, s)| {
-                    // TODO: Error handling
-                    (&middleware::Statement::try_from(s.clone()).unwrap() == op_arg).then_some(i)
+                    (&middleware::Statement::try_from(s.clone()).ok()? == op_arg).then_some(i)
                 })
                 .map(OperationArg::Index)
-                .ok_or(OperationArgError::StatementNotFound),
+                .ok_or(anyhow!("statement not found")),
         }
     }
 
@@ -241,7 +241,7 @@ impl MockMainPod {
         params: &Params,
         statements: &[Statement],
         input_operations: &[middleware::Operation],
-    ) -> Result<Vec<Operation>, OperationArgError> {
+    ) -> Result<Vec<Operation>> {
         let mut operations = Vec::new();
         for i in 0..params.max_priv_statements() {
             let op = input_operations
@@ -252,7 +252,7 @@ impl MockMainPod {
             let mut args = mid_args
                 .iter()
                 .map(|mid_arg| Self::find_op_arg(statements, mid_arg))
-                .collect::<Result<Vec<_>, OperationArgError>>()?;
+                .collect::<Result<Vec<_>>>()?;
             Self::pad_operation_args(params, &mut args);
             operations.push(Operation(op.code(), args));
         }
@@ -265,7 +265,7 @@ impl MockMainPod {
         params: &Params,
         statements: &[Statement],
         mut operations: Vec<Operation>,
-    ) -> Result<Vec<Operation>, OperationArgError> {
+    ) -> Result<Vec<Operation>> {
         let offset_public_statements = statements.len() - params.max_public_statements;
         operations.push(Operation(NativeOperation::NewEntry, vec![]));
         for i in 0..(params.max_public_statements - 1) {
@@ -318,7 +318,7 @@ impl MockMainPod {
             statements[statements.len() - params.max_public_statements..].to_vec();
 
         // get the id out of the public statements
-        let id: PodId = PodId(hash_statements(&public_statements)?);
+        let id: PodId = PodId(hash_statements(&public_statements));
 
         Ok(Self {
             params: params.clone(),
@@ -335,7 +335,7 @@ impl MockMainPod {
     fn statement_none(params: &Params) -> Statement {
         let mut args = Vec::with_capacity(params.max_statement_args);
         Self::pad_statement_args(&params, &mut args);
-        Statement(NativeStatement::None, args)
+        Statement(NativePredicate::None, args)
     }
 
     fn operation_none(params: &Params) -> Operation {
@@ -353,12 +353,12 @@ impl MockMainPod {
     }
 }
 
-pub fn hash_statements(statements: &[Statement]) -> Result<middleware::Hash> {
+pub fn hash_statements(statements: &[Statement]) -> middleware::Hash {
     let field_elems = statements
         .into_iter()
         .flat_map(|statement| statement.clone().to_fields().0)
         .collect::<Vec<_>>();
-    Ok(Hash(PoseidonHash::hash_no_pad(&field_elems).elements))
+    Hash(PoseidonHash::hash_no_pad(&field_elems).elements)
 }
 
 impl Pod for MockMainPod {
@@ -367,14 +367,14 @@ impl Pod for MockMainPod {
         // get the input_statements from the self.statements
         let input_statements = &self.statements[input_statement_offset..];
         // get the id out of the public statements, and ensure it is equal to self.id
-        let ids_match = self.id == PodId(hash_statements(&self.public_statements).unwrap());
+        let ids_match = self.id == PodId(hash_statements(&self.public_statements));
         // find a ValueOf statement from the public statements with key=KEY_TYPE and check that the
         // value is PodType::MockMainPod
         let has_type_statement = self
             .public_statements
             .iter()
             .find(|s| {
-                s.0 == NativeStatement::ValueOf
+                s.0 == NativePredicate::ValueOf
                     && s.1.len() > 0
                     && if let StatementArg::Key(AnchoredKey(pod_id, key_hash)) = s.1[0] {
                         pod_id == SELF && key_hash == hash_str(KEY_TYPE)
@@ -402,7 +402,7 @@ impl Pod for MockMainPod {
                         s,
                     )
                 })
-                .filter(|(_, s)| s.0 == NativeStatement::ValueOf)
+                .filter(|(_, s)| s.0 == NativePredicate::ValueOf)
                 .flat_map(|(i, s)| {
                     if let StatementArg::Key(ak) = &s.1[0] {
                         vec![(i, ak.1, ak.0)]
@@ -473,22 +473,22 @@ pub mod tests {
     use crate::middleware;
 
     #[test]
-    fn test_mock_main_zu_kyc() {
+    fn test_mock_main_zu_kyc() -> Result<()> {
         let params = middleware::Params::default();
 
         let (gov_id_builder, pay_stub_builder) = zu_kyc_sign_pod_builders(&params);
         let mut signer = MockSigner {
             pk: "ZooGov".into(),
         };
-        let gov_id_pod = gov_id_builder.sign(&mut signer).unwrap();
+        let gov_id_pod = gov_id_builder.sign(&mut signer)?;
         let mut signer = MockSigner {
             pk: "ZooDeel".into(),
         };
-        let pay_stub_pod = pay_stub_builder.sign(&mut signer).unwrap();
+        let pay_stub_pod = pay_stub_builder.sign(&mut signer)?;
         let kyc_builder = zu_kyc_pod_builder(&params, &gov_id_pod, &pay_stub_pod);
 
         let mut prover = MockProver {};
-        let kyc_pod = kyc_builder.prove(&mut prover).unwrap();
+        let kyc_pod = kyc_builder.prove(&mut prover)?;
         let pod = kyc_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
 
         println!("{:#}", pod);
@@ -496,14 +496,15 @@ pub mod tests {
         assert_eq!(pod.verify(), true); // TODO
                                         // println!("id: {}", pod.id());
                                         // println!("pub_statements: {:?}", pod.pub_statements());
+        Ok(())
     }
 
     #[test]
-    fn test_mock_main_great_boy() {
+    fn test_mock_main_great_boy() -> Result<()> {
         let great_boy_builder = great_boy_pod_full_flow();
 
         let mut prover = MockProver {};
-        let great_boy_pod = great_boy_builder.prove(&mut prover).unwrap();
+        let great_boy_pod = great_boy_builder.prove(&mut prover)?;
         let pod = great_boy_pod
             .pod
             .into_any()
@@ -513,16 +514,20 @@ pub mod tests {
         println!("{}", pod);
 
         assert_eq!(pod.verify(), true);
+
+        Ok(())
     }
 
     #[test]
-    fn test_mock_main_tickets() {
+    fn test_mock_main_tickets() -> Result<()> {
         let tickets_builder = tickets_pod_full_flow();
         let mut prover = MockProver {};
-        let proof_pod = tickets_builder.prove(&mut prover).unwrap();
+        let proof_pod = tickets_builder.prove(&mut prover)?;
         let pod = proof_pod.pod.into_any().downcast::<MockMainPod>().unwrap();
 
         println!("{}", pod);
         assert_eq!(pod.verify(), true);
+
+        Ok(())
     }
 }
