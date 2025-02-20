@@ -4,6 +4,7 @@
 // place it in the merkletree.rs file.
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::{hash_types::HashOut, poseidon::PoseidonHash};
 use plonky2::plonk::config::GenericConfig;
@@ -32,6 +33,11 @@ impl MerkleTree {
         let _ = root.compute_hash();
         Ok(Self { max_depth, root })
     }
+
+    /// returns an iterator over the leaves of the tree
+    pub fn iter(&self) -> Iter {
+        Iter { state: vec![&self.root] }
+    }
 }
 
 impl fmt::Display for MerkleTree {
@@ -51,6 +57,35 @@ impl fmt::Display for MerkleTree {
 pub struct MerkleProof {
     existence: bool,
     siblings: Vec<Hash>,
+}
+
+impl MerkleProof {
+    /// Computes the root of the Merkle tree suggested by a Merkle proof.
+    /// If a value is not provided, the terminal node is assumed to be empty.
+    pub fn compute_root(
+        &self,
+        max_depth: usize,
+        key: &Value,
+        value: Option<&Value>,
+    ) -> Result<Hash> {
+        if self.siblings.len() >= max_depth {
+            return Err(anyhow!("max depth reached"));
+        }
+
+        let path = keypath(max_depth, *key)?;
+        let mut h = value
+            .map(|v| Hash(PoseidonHash::hash_no_pad(&[key.0, v.0].concat()).elements))
+            .unwrap_or(Hash([GoldilocksField(0); 4]));
+        for (i, sibling) in self.siblings.iter().enumerate().rev() {
+            let input: Vec<F> = if path[i] {
+                [sibling.0, h.0].concat()
+            } else {
+                [h.0, sibling.0].concat()
+            };
+            h = Hash(PoseidonHash::hash_no_pad(&input).elements);
+        }
+        Ok(h)
+    }
 }
 
 impl fmt::Display for MerkleProof {
@@ -74,25 +109,25 @@ impl MerkleTree {
     /// returns the value at the given key
     pub fn get(&self, key: &Value) -> Result<Value> {
         let path = keypath(self.max_depth, *key)?;
-        let (k, v) = self.root.down(0, self.max_depth, path, None)?;
-        if &k != key {
-            return Err(anyhow!("key not found"));
+        let key_resolution = self.root.down(0, self.max_depth, path, None)?;
+        match key_resolution {
+            Some((k, v)) if &k == key => Ok(v),
+            _ => Err(anyhow!("key not found")),
         }
-        Ok(v)
     }
 
     /// returns a boolean indicating whether the key exists in the tree
     pub fn contains(&self, key: &Value) -> Result<bool> {
         let path = keypath(self.max_depth, *key)?;
         match self.root.down(0, self.max_depth, path, None) {
-            Ok((k, _)) => {
+            Ok(Some((k, _))) => {
                 if &k == key {
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             }
-            Err(_) => Ok(false),
+            _ => Ok(false),
         }
     }
 
@@ -103,31 +138,55 @@ impl MerkleTree {
         let path = keypath(self.max_depth, *key)?;
 
         let mut siblings: Vec<Hash> = Vec::new();
-        let (k, v) = self
+
+        match self
             .root
-            .down(0, self.max_depth, path, Some(&mut siblings))?;
-
-        if &k != key {
-            return Err(anyhow!("key not found"));
+            .down(0, self.max_depth, path, Some(&mut siblings))?
+        {
+            Some((k, v)) if &k == key => Ok((
+                v,
+                MerkleProof {
+                    existence: true,
+                    siblings,
+                },
+            )),
+            _ => Err(anyhow!("key not found")),
         }
-
-        Ok((
-            v,
-            MerkleProof {
-                existence: true,
-                siblings,
-            },
-        ))
     }
 
-    /// returns a proof of non-existence, which proves that the given `key`
-    /// does not exist in the tree
-    fn prove_nonexistence(&self, key: &Value) -> Result<MerkleProof> {
+    /// returns a proof of non-existence, which proves that the given
+    /// `key` does not exist in the tree. The return value specifies
+    /// the key-value pair in the leaf reached as a result of
+    /// resolving `key` as well as a `MerkleProof`.
+    fn prove_nonexistence(&self, key: &Value) -> Result<(Option<(Value, Value)>, MerkleProof)> {
+        let path = keypath(self.max_depth, *key)?;
+
+        let mut siblings: Vec<Hash> = Vec::new();
+
         // note: non-existence of a key can be in 2 cases:
-        // - the expected leaf does not exist
-        // - the expected leaf does exist in the tree, but it has a different `key`
-        // both cases prove that the given key don't exist in the tree.
-        todo!();
+        match self
+            .root
+            .down(0, self.max_depth, path, Some(&mut siblings))?
+        {
+            // - the expected leaf does not exist
+            None => Ok((
+                None,
+                MerkleProof {
+                    existence: false,
+                    siblings,
+                },
+            )),
+            // - the expected leaf does exist in the tree, but it has a different `key`
+            Some((k, v)) if &k != key => Ok((
+                Some((k, v)),
+                MerkleProof {
+                    existence: false,
+                    siblings,
+                },
+            )),
+            _ => Err(anyhow!("key found")),
+        }
+        // both cases prove that the given key don't exist in the tree. ∎
     }
 
     /// verifies an inclusion proof for the given `key` and `value`
@@ -138,38 +197,40 @@ impl MerkleTree {
         key: &Value,
         value: &Value,
     ) -> Result<()> {
-        if proof.siblings.len() >= max_depth {
-            return Err(anyhow!("max depth reached"));
-        }
-
-        let path = keypath(max_depth, *key)?;
-        let input: Vec<F> = [key.0, value.0].concat();
-        let mut h = Hash(PoseidonHash::hash_no_pad(&input).elements);
-        for (i, sibling) in proof.siblings.iter().enumerate().rev() {
-            let input: Vec<F> = if path[i] {
-                [sibling.0, h.0].concat()
-            } else {
-                [h.0, sibling.0].concat()
-            };
-            h = Hash(PoseidonHash::hash_no_pad(&input).elements);
-        }
+        let h = proof.compute_root(max_depth, key, Some(value))?;
 
         if h != root {
             return Err(anyhow!("proof of inclusion does not verify"));
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     /// verifies a non-inclusion proof for the given `key`, that is, the given
     /// `key` does not exist in the tree
-    fn verify_nonexistence(root: Hash, proof: &MerkleProof, key: &Value) -> Result<()> {
-        todo!();
+    fn verify_nonexistence(
+        max_depth: usize,
+        root: Hash,
+        proof: &MerkleProof,
+        key: &Value,
+        other_leaf: Option<&(Value, Value)>,
+    ) -> Result<()> {
+        match other_leaf {
+            Some((k, v)) if k == key => Err(anyhow!("Invalid non-existence proof.")),
+            _ => {
+                let k = other_leaf.map(|(k, _)| k).unwrap_or(key);
+                let v = other_leaf.map(|(_, v)| v);
+                let h = proof.compute_root(max_depth, k, v)?;
+
+                if h != root {
+                    return Err(anyhow!("proof of exclusion does not verify"));
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 
-    /// returns an iterator over the leaves of the tree
-    fn iter(&self) -> std::collections::hash_map::Iter<Value, Value> {
-        todo!();
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -232,20 +293,24 @@ impl Node {
         }
     }
 
-    /// goes down from the current node till finding a leaf or reaching the max_depth. The
-    /// `siblings` parameter is used to store the siblings while going down to the leaf, if the
-    /// given parameter is set to `None`, then no siblings are stored. In this way, the same method
-    /// `down` can be used by MerkleTree methods `get`, `contains`, `prove` and
-    /// `prove_nonexistence`.
-    /// Be aware that this method will return the found leaf at the given path, which may contain a
-    /// different key and value than the expected one.
+    /// Goes down from the current node until it encounters a terminal
+    /// node, viz. a leaf or empty node, or until it reaches the
+    /// maximum depth. The `siblings` parameter is used to store the
+    /// siblings while going down to the leaf, if the given parameter
+    /// is set to `None`, then no siblings are stored. In this way,
+    /// the same method `down` can be used by MerkleTree methods
+    /// `get`, `contains`, `prove` and `prove_nonexistence`.
+    ///
+    /// Be aware that this method will return the found leaf at the
+    /// given path, which may contain a different key and value than
+    /// the expected one.
     fn down(
         &self,
         lvl: usize,
         max_depth: usize,
         path: Vec<bool>,
         mut siblings: Option<&mut Vec<Hash>>,
-    ) -> Result<(Value, Value)> {
+    ) -> Result<Option<(Value, Value)>> {
         if lvl >= max_depth {
             return Err(anyhow!("max depth reached"));
         }
@@ -264,14 +329,14 @@ impl Node {
                     return n.left.down(lvl + 1, max_depth, path, siblings);
                 }
             }
-            Self::Leaf(l) => {
-                return Ok((l.key, l.value));
-            }
-            Self::None => {
-                return Err(anyhow!("leaf not found"));
-            }
+            Self::Leaf(Leaf {
+                key,
+                value,
+                path: _p,
+                hash: _h,
+            }) => Ok(Some((key.clone(), value.clone()))),
+            _ => Ok(None),
         }
-        Err(anyhow!("leaf not found"))
     }
 
     // adds the leaf at the tree from the current node (self), without computing any hash
@@ -448,6 +513,28 @@ fn keypath(max_depth: usize, k: Value) -> Result<Vec<bool>> {
         .collect())
 }
 
+pub struct Iter<'a> {
+    state: Vec<&'a Node>
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = (&'a Value, &'a Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.state.pop();
+        match node {
+            Some(Node::None) => self.next(),
+            Some(Node::Leaf(Leaf { hash: _, path: _, key, value })) => Some((key,value)),
+            Some(Node::Intermediate(Intermediate { hash: _, left, right })) => {
+                self.state.push(&right);
+                self.state.push(&left);
+                self.next()
+            },
+            _ => None
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -471,11 +558,27 @@ pub mod tests {
         // https://0xparc.github.io/pod2/merkletree.html#example-2
         println!("{}", tree);
 
+        // Inclusion checks
         let (v, proof) = tree.prove(&Value::from(13))?;
         assert_eq!(v, Value::from(1013));
         println!("{}", proof);
 
         MerkleTree::verify(32, tree.root(), &proof, &key, &value)?;
+
+        // Exclusion checks
+        let key = Value::from(12);
+        let (other_leaf, proof) = tree.prove_nonexistence(&key)?;
+        assert_eq!(other_leaf, Some((Value::from(4), Value::from(1004))));
+        println!("{}", proof);
+
+        MerkleTree::verify_nonexistence(32, tree.root(), &proof, &key, other_leaf.as_ref())?;
+
+        let key = Value::from(1);
+        let (other_leaf, proof) = tree.prove_nonexistence(&Value::from(1))?;
+        assert_eq!(other_leaf, None);
+        println!("{}", proof);
+
+        MerkleTree::verify_nonexistence(32, tree.root(), &proof, &key, other_leaf.as_ref())?;
 
         Ok(())
     }
