@@ -1,7 +1,10 @@
 //! The frontend includes the user-level abstractions and user-friendly types to define and work
 //! with Pods.
 
-use anyhow::{anyhow, Result};
+mod operation;
+mod statement;
+
+use anyhow::Result;
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::convert::From;
@@ -13,6 +16,8 @@ use crate::middleware::{
     hash_str, Hash, MainPodInputs, NativeOperation, NativeStatement, Params, PodId, PodProver,
     PodSigner, SELF,
 };
+pub use operation::*;
+pub use statement::*;
 
 /// This type is just for presentation purposes.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
@@ -165,162 +170,6 @@ pub struct AnchoredKey(pub Origin, pub String);
 impl From<AnchoredKey> for middleware::AnchoredKey {
     fn from(ak: AnchoredKey) -> Self {
         middleware::AnchoredKey(ak.0 .1, hash_str(&ak.1))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StatementArg {
-    Literal(Value),
-    Key(AnchoredKey),
-}
-
-impl fmt::Display for StatementArg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Literal(v) => write!(f, "{}", v),
-            Self::Key(r) => write!(f, "{}.{}", r.0 .1, r.1),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativeStatement, pub Vec<StatementArg>);
-
-impl TryFrom<Statement> for middleware::Statement {
-    type Error = anyhow::Error;
-    fn try_from(s: Statement) -> Result<Self> {
-        type MS = middleware::Statement;
-        type NS = NativeStatement;
-        type SA = StatementArg;
-        let args = (
-            s.1.get(0).cloned(),
-            s.1.get(1).cloned(),
-            s.1.get(2).cloned(),
-        );
-        Ok(match (s.0, args) {
-            (NS::None, (None, None, None)) => MS::None,
-            (NS::ValueOf, (Some(SA::Key(ak)), Some(StatementArg::Literal(v)), None)) => {
-                MS::ValueOf(ak.into(), (&v).into())
-            }
-            (NS::Equal, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
-                MS::Equal(ak1.into(), ak2.into())
-            }
-            (NS::NotEqual, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
-                MS::NotEqual(ak1.into(), ak2.into())
-            }
-            (NS::Gt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
-                MS::Gt(ak1.into(), ak2.into())
-            }
-            (NS::Lt, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
-                MS::Lt(ak1.into(), ak2.into())
-            }
-            (NS::Contains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
-                MS::Contains(ak1.into(), ak2.into())
-            }
-            (NS::NotContains, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), None)) => {
-                MS::NotContains(ak1.into(), ak2.into())
-            }
-            (NS::SumOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
-                MS::SumOf(ak1.into(), ak2.into(), ak3.into())
-            }
-            (NS::ProductOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
-                MS::ProductOf(ak1.into(), ak2.into(), ak3.into())
-            }
-            (NS::MaxOf, (Some(SA::Key(ak1)), Some(SA::Key(ak2)), Some(SA::Key(ak3)))) => {
-                MS::MaxOf(ak1.into(), ak2.into(), ak3.into())
-            }
-            _ => Err(anyhow!("Ill-formed statement: {}", s))?,
-        })
-    }
-}
-
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?} ", self.0)?;
-        for (i, arg) in self.1.iter().enumerate() {
-            if i != 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", arg)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum OperationArg {
-    Statement(Statement),
-    Literal(Value),
-    Entry(String, Value),
-}
-
-impl fmt::Display for OperationArg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OperationArg::Statement(s) => write!(f, "{}", s),
-            OperationArg::Literal(v) => write!(f, "{}", v),
-            OperationArg::Entry(k, v) => write!(f, "({}, {})", k, v),
-        }
-    }
-}
-
-impl From<Value> for OperationArg {
-    fn from(v: Value) -> Self {
-        Self::Literal(v)
-    }
-}
-
-impl From<&Value> for OperationArg {
-    fn from(v: &Value) -> Self {
-        Self::Literal(v.clone())
-    }
-}
-
-impl From<&str> for OperationArg {
-    fn from(s: &str) -> Self {
-        Self::Literal(Value::from(s))
-    }
-}
-
-impl From<i64> for OperationArg {
-    fn from(v: i64) -> Self {
-        Self::Literal(Value::from(v))
-    }
-}
-
-impl From<bool> for OperationArg {
-    fn from(b: bool) -> Self {
-        Self::Literal(Value::from(b))
-    }
-}
-
-impl From<(&SignedPod, &str)> for OperationArg {
-    fn from((pod, key): (&SignedPod, &str)) -> Self {
-        // TODO: Actual value, TryFrom.
-        let value = pod.kvs().get(&hash_str(key)).unwrap().clone();
-        Self::Statement(Statement(
-            NativeStatement::ValueOf,
-            vec![
-                StatementArg::Key(AnchoredKey(pod.origin(), key.to_string())),
-                StatementArg::Literal(Value::Raw(value)),
-            ],
-        ))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
-
-impl fmt::Display for Operation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?} ", self.0)?;
-        for (i, arg) in self.1.iter().enumerate() {
-            if i != 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", arg)?;
-        }
-        Ok(())
     }
 }
 

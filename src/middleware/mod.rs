@@ -1,24 +1,24 @@
 //! The middleware includes the type definitions and the traits used to connect the frontend and
 //! the backend.
 
+mod operation;
+mod statement;
+
 use anyhow::{anyhow, Error, Result};
 use dyn_clone::DynClone;
 use hex::{FromHex, FromHexError};
+pub use operation::*;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
+pub use statement::*;
 use std::any::Any;
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;
 use std::fmt;
-use strum_macros::FromRepr;
 
 pub mod containers;
-
-pub const KEY_SIGNER: &str = "_signer";
-pub const KEY_TYPE: &str = "_type";
-pub const STATEMENT_ARG_F_LEN: usize = 8;
 
 /// F is the native field we use everywhere.  Currently it's Goldilocks from plonky2
 pub type F = GoldilocksField;
@@ -27,6 +27,20 @@ pub type C = PoseidonGoldilocksConfig;
 /// D defines the extension degree of the field used in the Plonky2 proofs (quadratic extension).
 pub const D: usize = 2;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// AnchoredKey is a tuple containing (OriginId: PodId, key: Hash)
+pub struct AnchoredKey(pub PodId, pub Hash);
+
+impl AnchoredKey {
+    pub fn origin(&self) -> PodId {
+        self.0
+    }
+    pub fn key(&self) -> Hash {
+        self.1
+    }
+}
+
+/// An entry consists of a key-value pair.
 pub type Entry = (String, Value);
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
@@ -229,369 +243,6 @@ impl Default for Params {
             max_public_statements: 10,
             max_statement_args: 5,
             max_operation_args: 5,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, FromRepr, PartialEq, Eq)]
-pub enum NativeStatement {
-    None = 0,
-    ValueOf = 1,
-    Equal = 2,
-    NotEqual = 3,
-    Gt = 4,
-    Lt = 5,
-    Contains = 6,
-    NotContains = 7,
-    SumOf = 8,
-    ProductOf = 9,
-    MaxOf = 10,
-}
-
-impl ToFields for NativeStatement {
-    fn to_fields(self) -> (Vec<F>, usize) {
-        (vec![F::from_canonical_u64(self as u64)], 1)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// AnchoredKey is a tuple containing (OriginId: PodId, key: Hash)
-pub struct AnchoredKey(pub PodId, pub Hash);
-
-impl AnchoredKey {
-    pub fn origin(&self) -> PodId {
-        self.0
-    }
-    pub fn key(&self) -> Hash {
-        self.1
-    }
-}
-
-// TODO: Incorporate custom statements into this enum.
-/// Type encapsulating statements with their associated arguments.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Statement {
-    None,
-    ValueOf(AnchoredKey, Value),
-    Equal(AnchoredKey, AnchoredKey),
-    NotEqual(AnchoredKey, AnchoredKey),
-    Gt(AnchoredKey, AnchoredKey),
-    Lt(AnchoredKey, AnchoredKey),
-    Contains(AnchoredKey, AnchoredKey),
-    NotContains(AnchoredKey, AnchoredKey),
-    SumOf(AnchoredKey, AnchoredKey, AnchoredKey),
-    ProductOf(AnchoredKey, AnchoredKey, AnchoredKey),
-    MaxOf(AnchoredKey, AnchoredKey, AnchoredKey),
-}
-
-impl Statement {
-    pub fn is_none(&self) -> bool {
-        self == &Self::None
-    }
-    pub fn code(&self) -> NativeStatement {
-        match self {
-            Self::None => NativeStatement::None,
-            Self::ValueOf(_, _) => NativeStatement::ValueOf,
-            Self::Equal(_, _) => NativeStatement::Equal,
-            Self::NotEqual(_, _) => NativeStatement::NotEqual,
-            Self::Gt(_, _) => NativeStatement::Gt,
-            Self::Lt(_, _) => NativeStatement::Lt,
-            Self::Contains(_, _) => NativeStatement::Contains,
-            Self::NotContains(_, _) => NativeStatement::NotContains,
-            Self::SumOf(_, _, _) => NativeStatement::SumOf,
-            Self::ProductOf(_, _, _) => NativeStatement::ProductOf,
-            Self::MaxOf(_, _, _) => NativeStatement::MaxOf,
-        }
-    }
-    pub fn args(&self) -> Vec<StatementArg> {
-        use StatementArg::*;
-        match self.clone() {
-            Self::None => vec![],
-            Self::ValueOf(ak, v) => vec![Key(ak), Literal(v)],
-            Self::Equal(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::NotEqual(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::Gt(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::Lt(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::Contains(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::NotContains(ak1, ak2) => vec![Key(ak1), Key(ak2)],
-            Self::SumOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
-            Self::ProductOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
-            Self::MaxOf(ak1, ak2, ak3) => vec![Key(ak1), Key(ak2), Key(ak3)],
-        }
-    }
-}
-
-impl ToFields for Statement {
-    fn to_fields(self) -> (Vec<F>, usize) {
-        let (native_statement_f, native_statement_f_len) = self.code().to_fields();
-        let (vec_statementarg_f, vec_statementarg_f_len) = self
-            .args()
-            .into_iter()
-            .map(|statement_arg| statement_arg.to_fields())
-            .fold((Vec::new(), 0), |mut acc, (f, l)| {
-                acc.0.extend(f);
-                acc.1 += l;
-                acc
-            });
-        (
-            [native_statement_f, vec_statementarg_f].concat(),
-            native_statement_f_len + vec_statementarg_f_len,
-        )
-    }
-}
-
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} ", self.code())?;
-        for (i, arg) in self.args().iter().enumerate() {
-            if i != 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", arg)?;
-        }
-        Ok(())
-    }
-}
-
-/// Statement argument type. Useful for statement decompositions.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StatementArg {
-    None,
-    Literal(Value),
-    Key(AnchoredKey),
-}
-
-impl fmt::Display for StatementArg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            StatementArg::None => write!(f, "none"),
-            StatementArg::Literal(v) => write!(f, "{}", v),
-            StatementArg::Key(r) => write!(f, "{}.{}", r.0, r.1),
-        }
-    }
-}
-
-impl StatementArg {
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-    pub fn literal(&self) -> Result<Value> {
-        match self {
-            Self::Literal(value) => Ok(*value),
-            _ => Err(anyhow!("Statement argument {:?} is not a literal.", self)),
-        }
-    }
-    pub fn key(&self) -> Result<AnchoredKey> {
-        match self {
-            Self::Key(ak) => Ok(ak.clone()),
-            _ => Err(anyhow!("Statement argument {:?} is not a key.", self)),
-        }
-    }
-}
-
-impl ToFields for StatementArg {
-    fn to_fields(self) -> (Vec<F>, usize) {
-        // NOTE: current version returns always the same amount of field elements in the returned
-        // vector, which means that the `None` case is padded with 8 zeroes, and the `Literal` case
-        // is padded with 4 zeroes. Since the returned vector will mostly be hashed (and reproduced
-        // in-circuit), we might be interested into reducing the length of it. If that's the case,
-        // we can check if it makes sense to make it dependant on the concrete StatementArg; that
-        // is, when dealing with a `None` it would be a single field element (zero value), and when
-        // dealing with `Literal` it would be of length 4.
-        let f = match self {
-            StatementArg::None => vec![F::ZERO; STATEMENT_ARG_F_LEN],
-            StatementArg::Literal(v) => {
-                let value_f = v.0.to_vec();
-                [
-                    value_f.clone(),
-                    vec![F::ZERO; STATEMENT_ARG_F_LEN - value_f.len()],
-                ]
-                .concat()
-            }
-            StatementArg::Key(ak) => {
-                let (podid_f, _) = ak.0.to_fields();
-                let (hash_f, _) = ak.1.to_fields();
-                [podid_f, hash_f].concat()
-            }
-        };
-        assert_eq!(f.len(), STATEMENT_ARG_F_LEN); // sanity check
-        (f, STATEMENT_ARG_F_LEN)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NativeOperation {
-    None = 0,
-    NewEntry = 1,
-    CopyStatement = 2,
-    EqualFromEntries = 3,
-    NotEqualFromEntries = 4,
-    GtFromEntries = 5,
-    LtFromEntries = 6,
-    TransitiveEqualFromStatements = 7,
-    GtToNotEqual = 8,
-    LtToNotEqual = 9,
-    ContainsFromEntries = 10,
-    NotContainsFromEntries = 11,
-    RenameContainedBy = 12,
-    SumOf = 13,
-    ProductOf = 14,
-    MaxOf = 15,
-}
-
-// TODO: Refine this enum.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Operation {
-    None,
-    NewEntry,
-    CopyStatement(Statement),
-    EqualFromEntries(Statement, Statement),
-    NotEqualFromEntries(Statement, Statement),
-    GtFromEntries(Statement, Statement),
-    LtFromEntries(Statement, Statement),
-    TransitiveEqualFromStatements(Statement, Statement),
-    GtToNotEqual(Statement),
-    LtToNotEqual(Statement),
-    ContainsFromEntries(Statement, Statement),
-    NotContainsFromEntries(Statement, Statement),
-    RenameContainedBy(Statement, Statement),
-    SumOf(Statement, Statement, Statement),
-    ProductOf(Statement, Statement, Statement),
-    MaxOf(Statement, Statement, Statement),
-}
-
-impl Operation {
-    pub fn code(&self) -> NativeOperation {
-        use NativeOperation::*;
-        match self {
-            Self::None => None,
-            Self::NewEntry => NewEntry,
-            Self::CopyStatement(_) => CopyStatement,
-            Self::EqualFromEntries(_, _) => EqualFromEntries,
-            Self::NotEqualFromEntries(_, _) => NotEqualFromEntries,
-            Self::GtFromEntries(_, _) => GtFromEntries,
-            Self::LtFromEntries(_, _) => LtFromEntries,
-            Self::TransitiveEqualFromStatements(_, _) => TransitiveEqualFromStatements,
-            Self::GtToNotEqual(_) => GtToNotEqual,
-            Self::LtToNotEqual(_) => LtToNotEqual,
-            Self::ContainsFromEntries(_, _) => ContainsFromEntries,
-            Self::NotContainsFromEntries(_, _) => NotContainsFromEntries,
-            Self::RenameContainedBy(_, _) => RenameContainedBy,
-            Self::SumOf(_, _, _) => SumOf,
-            Self::ProductOf(_, _, _) => ProductOf,
-            Self::MaxOf(_, _, _) => MaxOf,
-        }
-    }
-
-    pub fn args(&self) -> Vec<Statement> {
-        match self.clone() {
-            Self::None => vec![],
-            Self::NewEntry => vec![],
-            Self::CopyStatement(s) => vec![s],
-            Self::EqualFromEntries(s1, s2) => vec![s1, s2],
-            Self::NotEqualFromEntries(s1, s2) => vec![s1, s2],
-            Self::GtFromEntries(s1, s2) => vec![s1, s2],
-            Self::LtFromEntries(s1, s2) => vec![s1, s2],
-            Self::TransitiveEqualFromStatements(s1, s2) => vec![s1, s2],
-            Self::GtToNotEqual(s) => vec![s],
-            Self::LtToNotEqual(s) => vec![s],
-            Self::ContainsFromEntries(s1, s2) => vec![s1, s2],
-            Self::NotContainsFromEntries(s1, s2) => vec![s1, s2],
-            Self::RenameContainedBy(s1, s2) => vec![s1, s2],
-            Self::SumOf(s1, s2, s3) => vec![s1, s2, s3],
-            Self::ProductOf(s1, s2, s3) => vec![s1, s2, s3],
-            Self::MaxOf(s1, s2, s3) => vec![s1, s2, s3],
-        }
-    }
-    /// Forms operation from op-code and arguments.
-    pub fn op(op_code: NativeOperation, args: &[Statement]) -> Result<Self> {
-        type NO = NativeOperation;
-        let arg_tup = (
-            args.get(0).cloned(),
-            args.get(1).cloned(),
-            args.get(2).cloned(),
-        );
-        Ok(match (op_code, arg_tup, args.len()) {
-            (NO::None, (None, None, None), 0) => Self::None,
-            (NO::NewEntry, (None, None, None), 0) => Self::NewEntry,
-            (NO::CopyStatement, (Some(s), None, None), 1) => Self::CopyStatement(s),
-            (NO::EqualFromEntries, (Some(s1), Some(s2), None), 2) => Self::EqualFromEntries(s1, s2),
-            (NO::NotEqualFromEntries, (Some(s1), Some(s2), None), 2) => {
-                Self::NotEqualFromEntries(s1, s2)
-            }
-            (NO::GtFromEntries, (Some(s1), Some(s2), None), 2) => Self::GtFromEntries(s1, s2),
-            (NO::LtFromEntries, (Some(s1), Some(s2), None), 2) => Self::LtFromEntries(s1, s2),
-            (NO::ContainsFromEntries, (Some(s1), Some(s2), None), 2) => {
-                Self::ContainsFromEntries(s1, s2)
-            }
-            (NO::NotContainsFromEntries, (Some(s1), Some(s2), None), 2) => {
-                Self::NotContainsFromEntries(s1, s2)
-            }
-            (NO::RenameContainedBy, (Some(s1), Some(s2), None), 2) => {
-                Self::RenameContainedBy(s1, s2)
-            }
-            (NO::SumOf, (Some(s1), Some(s2), Some(s3)), 3) => Self::SumOf(s1, s2, s3),
-            (NO::ProductOf, (Some(s1), Some(s2), Some(s3)), 3) => Self::ProductOf(s1, s2, s3),
-            (NO::MaxOf, (Some(s1), Some(s2), Some(s3)), 3) => Self::MaxOf(s1, s2, s3),
-            _ => Err(anyhow!(
-                "Ill-formed operation {:?} with arguments {:?}.",
-                op_code,
-                args
-            ))?,
-        })
-    }
-    /// Checks the given operation against a statement.
-    pub fn check(&self, output_statement: &Statement) -> Result<bool> {
-        use Statement::*;
-        match (self, output_statement) {
-            (Self::None, None) => Ok(true),
-            (Self::NewEntry, ValueOf(AnchoredKey(pod_id, _), _)) => Ok(pod_id == &SELF),
-            (Self::CopyStatement(s1), s2) => Ok(s1 == s2),
-            (Self::EqualFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), Equal(ak3, ak4)) => {
-                Ok(v1 == v2 && ak3 == ak1 && ak4 == ak2)
-            }
-            (Self::NotEqualFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), NotEqual(ak3, ak4)) => {
-                Ok(v1 != v2 && ak3 == ak1 && ak4 == ak2)
-            }
-            (Self::GtFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), Gt(ak3, ak4)) => {
-                Ok(v1 > v2 && ak3 == ak1 && ak4 == ak2)
-            }
-            (Self::LtFromEntries(ValueOf(ak1, v1), ValueOf(ak2, v2)), Lt(ak3, ak4)) => {
-                Ok(v1 < v2 && ak3 == ak1 && ak4 == ak2)
-            }
-            (Self::ContainsFromEntries(_, _), Contains(_, _)) =>
-            /* TODO */
-            {
-                Ok(true)
-            }
-            (Self::NotContainsFromEntries(_, _), NotContains(_, _)) =>
-            /* TODO */
-            {
-                Ok(true)
-            }
-            (
-                Self::TransitiveEqualFromStatements(Equal(ak1, ak2), Equal(ak3, ak4)),
-                Equal(ak5, ak6),
-            ) => Ok(ak2 == ak3 && ak5 == ak1 && ak6 == ak4),
-            (Self::GtToNotEqual(Gt(ak1, ak2)), NotEqual(ak3, ak4)) => Ok(ak1 == ak3 && ak2 == ak4),
-            (Self::LtToNotEqual(Lt(ak1, ak2)), NotEqual(ak3, ak4)) => Ok(ak1 == ak3 && ak2 == ak4),
-            (Self::RenameContainedBy(Contains(ak1, ak2), Equal(ak3, ak4)), Contains(ak5, ak6)) => {
-                Ok(ak1 == ak3 && ak4 == ak5 && ak2 == ak6)
-            }
-            (
-                Self::SumOf(ValueOf(ak1, v1), ValueOf(ak2, v2), ValueOf(ak3, v3)),
-                SumOf(ak4, ak5, ak6),
-            ) => {
-                let v1: i64 = v1.clone().try_into()?;
-                let v2: i64 = v2.clone().try_into()?;
-                let v3: i64 = v3.clone().try_into()?;
-                Ok((v1 == v2 + v3) && ak4 == ak1 && ak5 == ak2 && ak6 == ak3)
-            }
-            _ => Err(anyhow!(
-                "Invalid deduction: {:?} ⇏ {:#}",
-                self,
-                output_statement
-            )),
         }
     }
 }
