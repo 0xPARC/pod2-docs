@@ -36,7 +36,9 @@ impl MerkleTree {
 
     /// returns an iterator over the leaves of the tree
     pub fn iter(&self) -> Iter {
-        Iter { state: vec![&self.root] }
+        Iter {
+            state: vec![&self.root],
+        }
     }
 }
 
@@ -50,6 +52,15 @@ impl fmt::Display for MerkleTree {
         writeln!(f, "node [fontname=Monospace,fontsize=10,shape=box]");
         write!(f, "{}", self.root);
         writeln!(f, "\n}}\n-----")
+    }
+}
+
+impl<'a> IntoIterator for &'a MerkleTree {
+    type Item = (&'a Value, &'a Value);
+    type IntoIter = Iter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -230,7 +241,6 @@ impl MerkleTree {
             }
         }
     }
-
 }
 
 #[derive(Clone, Debug)]
@@ -514,7 +524,7 @@ fn keypath(max_depth: usize, k: Value) -> Result<Vec<bool>> {
 }
 
 pub struct Iter<'a> {
-    state: Vec<&'a Node>
+    state: Vec<&'a Node>,
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -524,19 +534,30 @@ impl<'a> Iterator for Iter<'a> {
         let node = self.state.pop();
         match node {
             Some(Node::None) => self.next(),
-            Some(Node::Leaf(Leaf { hash: _, path: _, key, value })) => Some((key,value)),
-            Some(Node::Intermediate(Intermediate { hash: _, left, right })) => {
+            Some(Node::Leaf(Leaf {
+                hash: _,
+                path: _,
+                key,
+                value,
+            })) => Some((key, value)),
+            Some(Node::Intermediate(Intermediate {
+                hash: _,
+                left,
+                right,
+            })) => {
                 self.state.push(&right);
                 self.state.push(&left);
                 self.next()
-            },
-            _ => None
+            }
+            _ => None,
         }
     }
 }
 
 #[cfg(test)]
 pub mod tests {
+    use std::cmp::Ordering;
+
     use super::*;
     use crate::middleware::hash_str;
 
@@ -579,6 +600,37 @@ pub mod tests {
         println!("{}", proof);
 
         MerkleTree::verify_nonexistence(32, tree.root(), &proof, &key, other_leaf.as_ref())?;
+
+        // Check iterator
+        let collected_kvs: Vec<_> = tree.into_iter().collect::<Vec<_>>();
+
+        // Expected key ordering
+        let cmp = |max_depth: usize| {
+            move |k1, k2| {
+                let path1 = keypath(max_depth, k1).unwrap();
+                let path2 = keypath(max_depth, k2).unwrap();
+
+                let first_unequal_bits = std::iter::zip(path1, path2).find(|(b1, b2)| b1 != b2);
+
+                match first_unequal_bits {
+                    Some((b1, b2)) => {
+                        if b1 < b2 {
+                            Ordering::Less
+                        } else {
+                            Ordering::Greater
+                        }
+                    }
+                    _ => Ordering::Equal,
+                }
+            }
+        };
+
+        let sorted_kvs = kvs
+            .iter()
+            .sorted_by(|(k1, _), (k2, _)| cmp(32)(**k1, **k2))
+            .collect::<Vec<_>>();
+
+        assert_eq!(collected_kvs, sorted_kvs);
 
         Ok(())
     }
