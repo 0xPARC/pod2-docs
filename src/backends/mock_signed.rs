@@ -1,6 +1,6 @@
 use crate::middleware::{
-    containers::Dictionary, hash_str, AnchoredKey, Hash, NativePredicate, Params, Pod, PodId,
-    PodSigner, PodType, Statement, StatementArg, Value, KEY_SIGNER, KEY_TYPE,
+    containers::Dictionary, hash_str, AnchoredKey, Hash, Params, Pod, PodId, PodSigner, PodType,
+    Statement, Value, KEY_SIGNER, KEY_TYPE,
 };
 use crate::primitives::merkletree::MerkleTree;
 use anyhow::Result;
@@ -81,15 +81,7 @@ impl Pod for MockSignedPod {
         let id = self.id();
         self.dict
             .iter()
-            .map(|(k, v)| {
-                Statement(
-                    NativePredicate::ValueOf,
-                    vec![
-                        StatementArg::Key(AnchoredKey(id, Hash(k.0))),
-                        StatementArg::Literal(*v),
-                    ],
-                )
-            })
+            .map(|(k, v)| Statement::ValueOf(AnchoredKey(id, Hash(k.0)), *v))
             .collect()
     }
 

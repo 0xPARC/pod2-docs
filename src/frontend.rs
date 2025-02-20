@@ -1,6 +1,9 @@
 //! The frontend includes the user-level abstractions and user-friendly types to define and work
 //! with Pods.
 
+mod operation;
+mod statement;
+
 use anyhow::Result;
 use itertools::Itertools;
 use std::collections::HashMap;
@@ -13,6 +16,8 @@ use crate::middleware::{
     hash_str, Hash, MainPodInputs, NativeOperation, NativePredicate, Params, PodId, PodProver,
     PodSigner, SELF,
 };
+pub use operation::*;
+pub use statement::*;
 
 /// This type is just for presentation purposes.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
@@ -30,9 +35,11 @@ pub struct Origin(pub PodClass, pub PodId);
 pub enum Value {
     String(String),
     Int(i64),
+    Bool(bool),
     Dictionary(Dictionary),
     Set(Set),
     Array(Array),
+    Raw(middleware::Value),
 }
 
 impl From<&str> for Value {
@@ -47,14 +54,22 @@ impl From<i64> for Value {
     }
 }
 
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
 impl From<&Value> for middleware::Value {
     fn from(v: &Value) -> Self {
         match v {
             Value::String(s) => middleware::Value(hash_str(s).0),
             Value::Int(v) => middleware::Value::from(*v),
+            Value::Bool(b) => middleware::Value::from(*b as i64),
             Value::Dictionary(d) => middleware::Value(d.commitment().0),
             Value::Set(s) => middleware::Value(s.commitment().0),
             Value::Array(a) => middleware::Value(a.commitment().0),
+            Value::Raw(v) => v.clone(),
         }
     }
 }
@@ -64,9 +79,11 @@ impl fmt::Display for Value {
         match self {
             Value::String(s) => write!(f, "\"{}\"", s),
             Value::Int(v) => write!(f, "{}", v),
+            Value::Bool(b) => write!(f, "{}", b),
             Value::Dictionary(d) => write!(f, "dict:{}", d.commitment()),
             Value::Set(s) => write!(f, "set:{}", s.commitment()),
             Value::Array(a) => write!(f, "arr:{}", a.commitment()),
+            Value::Raw(v) => write!(f, "{}", v),
         }
     }
 }
@@ -150,105 +167,9 @@ impl SignedPod {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnchoredKey(pub Origin, pub String);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StatementArg {
-    Literal(Value),
-    Key(AnchoredKey),
-}
-
-impl fmt::Display for StatementArg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Literal(v) => write!(f, "{}", v),
-            Self::Key(r) => write!(f, "{}.{}", r.0 .1, r.1),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Statement(pub NativePredicate, pub Vec<StatementArg>);
-
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?} ", self.0)?;
-        for (i, arg) in self.1.iter().enumerate() {
-            if i != 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", arg)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum OperationArg {
-    Statement(Statement),
-    Key(AnchoredKey),
-    Literal(Value),
-    Entry(String, Value),
-}
-
-impl fmt::Display for OperationArg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OperationArg::Statement(s) => write!(f, "{}", s),
-            OperationArg::Key(k) => write!(f, "{}.{}", k.0 .1, k.1),
-            OperationArg::Literal(v) => write!(f, "{}", v),
-            OperationArg::Entry(k, v) => write!(f, "({}, {})", k, v),
-        }
-    }
-}
-
-impl From<Value> for OperationArg {
-    fn from(v: Value) -> Self {
-        Self::Literal(v)
-    }
-}
-
-impl From<&Value> for OperationArg {
-    fn from(v: &Value) -> Self {
-        Self::Literal(v.clone())
-    }
-}
-
-impl From<&str> for OperationArg {
-    fn from(s: &str) -> Self {
-        Self::Literal(Value::from(s))
-    }
-}
-
-impl From<i64> for OperationArg {
-    fn from(v: i64) -> Self {
-        Self::Literal(Value::from(v))
-    }
-}
-
-impl From<(Origin, &str)> for OperationArg {
-    fn from((origin, key): (Origin, &str)) -> Self {
-        Self::Key(AnchoredKey(origin, key.to_string()))
-    }
-}
-
-impl From<(&SignedPod, &str)> for OperationArg {
-    fn from((pod, key): (&SignedPod, &str)) -> Self {
-        Self::Key(AnchoredKey(pod.origin(), key.to_string()))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Operation(pub NativeOperation, pub Vec<OperationArg>);
-
-impl fmt::Display for Operation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?} ", self.0)?;
-        for (i, arg) in self.1.iter().enumerate() {
-            if i != 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", arg)?;
-        }
-        Ok(())
+impl From<AnchoredKey> for middleware::AnchoredKey {
+    fn from(ak: AnchoredKey) -> Self {
+        middleware::AnchoredKey(ak.0 .1, hash_str(&ak.1))
     }
 }
 
@@ -314,8 +235,13 @@ impl MainPodBuilder {
         let mut st_args = Vec::new();
         for arg in args.iter_mut() {
             match arg {
-                OperationArg::Statement(_s) => panic!("can't convert Statement to StatementArg"),
-                OperationArg::Key(k) => st_args.push(StatementArg::Key(k.clone())),
+                OperationArg::Statement(s) => {
+                    if s.0 == NativePredicate::ValueOf {
+                        st_args.push(s.1[0].clone())
+                    } else {
+                        panic!("Invalid statement argument.");
+                    }
+                }
                 OperationArg::Literal(v) => {
                     let k = format!("c{}", self.const_cnt);
                     self.const_cnt += 1;
@@ -326,7 +252,7 @@ impl MainPodBuilder {
                             vec![OperationArg::Entry(k.clone(), v.clone())],
                         ),
                     );
-                    *arg = OperationArg::Key(AnchoredKey(Origin(PodClass::Main, SELF), k.clone()));
+                    *arg = OperationArg::Statement(value_of_st.clone());
                     st_args.push(value_of_st.1[0].clone())
                 }
                 OperationArg::Entry(k, v) => {
@@ -457,10 +383,9 @@ impl MainPodCompiler {
         self.operations.push(op);
     }
 
-    fn compile_op_arg(&self, op_arg: &OperationArg) -> middleware::OperationArg {
+    fn compile_op_arg(&self, op_arg: &OperationArg) -> Option<middleware::Statement> {
         match op_arg {
-            OperationArg::Statement(s) => middleware::OperationArg::Statement(self.compile_st(s)),
-            OperationArg::Key(k) => middleware::OperationArg::Key(Self::compile_anchored_key(k)),
+            OperationArg::Statement(s) => Some(self.compile_st(s)),
             OperationArg::Literal(_v) => {
                 // OperationArg::Literal is a syntax sugar for the frontend.  This is translated to
                 // a new ValueOf statement and it's key used instead.
@@ -470,47 +395,29 @@ impl MainPodCompiler {
                 // OperationArg::Entry is only used in the frontend.  The (key, value) will only
                 // appear in the ValueOf statement in the backend.  This is because a new ValueOf
                 // statement doesn't have any requirement on the key and value.
-                middleware::OperationArg::None
+                None
             }
         }
-    }
-
-    fn compile_anchored_key(key: &AnchoredKey) -> middleware::AnchoredKey {
-        middleware::AnchoredKey(key.0 .1, hash_str(&key.1))
     }
 
     fn compile_st(&self, st: &Statement) -> middleware::Statement {
-        let mut st_args = Vec::new();
-        let Statement(front_st_typ, front_st_args) = st;
-        for front_st_arg in front_st_args {
-            match front_st_arg {
-                StatementArg::Literal(v) => {
-                    st_args.push(middleware::StatementArg::Literal(middleware::Value::from(
-                        v,
-                    )));
-                }
-                StatementArg::Key(k) => {
-                    let key = Self::compile_anchored_key(k);
-                    st_args.push(middleware::StatementArg::Key(key));
-                }
-            };
-            if st_args.len() > self.params.max_statement_args {
-                panic!("too many statement st_args");
-            }
-        }
+        st.clone().try_into().unwrap()
+    }
 
-        middleware::Statement(*front_st_typ, st_args)
+    fn compile_op(&self, op: &Operation) -> middleware::Operation {
+        // TODO
+        let mop_code: middleware::NativeOperation = op.0.into();
+        let mop_args =
+            op.1.iter()
+                .flat_map(|arg| self.compile_op_arg(arg).map(|s| s.try_into().unwrap()))
+                .collect::<Vec<middleware::Statement>>();
+        middleware::Operation::op(mop_code, &mop_args).unwrap()
     }
 
     fn compile_st_op(&mut self, st: &Statement, op: &Operation) {
         let middle_st = self.compile_st(st);
-        self.push_st_op(
-            middle_st,
-            middleware::Operation(
-                op.0,
-                op.1.iter().map(|arg| self.compile_op_arg(arg)).collect(),
-            ),
-        );
+        let middle_op = self.compile_op(op);
+        self.push_st_op(middle_st, middle_op);
     }
 
     pub fn compile<'a>(
@@ -579,7 +486,10 @@ pub mod build_utils {
 pub mod tests {
     use super::*;
     use crate::backends::mock_signed::MockSigner;
-    use crate::examples::{great_boy_pod_full_flow, zu_kyc_pod_builder, zu_kyc_sign_pod_builders};
+    use crate::examples::{
+        great_boy_pod_full_flow, tickets_pod_full_flow, zu_kyc_pod_builder,
+        zu_kyc_sign_pod_builders,
+    };
 
     #[test]
     fn test_front_zu_kyc() -> Result<()> {
@@ -614,6 +524,14 @@ pub mod tests {
         println!("{}", great_boy);
 
         // TODO: prove kyc with MockProver and print it
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_front_tickets() -> Result<()> {
+        let builder = tickets_pod_full_flow();
+        println!("{}", builder);
 
         Ok(())
     }
